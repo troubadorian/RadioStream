@@ -1,0 +1,518 @@
+package com.troubadorian.streamradio.client.model;
+
+import android.content.Context;
+import android.content.Intent;
+import android.database.Cursor;
+import android.media.MediaPlayer;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.View.OnClickListener;
+import android.view.View.OnTouchListener;
+import android.widget.ImageView;
+import android.widget.ProgressBar;
+import android.widget.SimpleCursorAdapter;
+import android.widget.TextView;
+
+import com.troubadorian.streamradio.client.view.IHRViewInfoSeparator;
+import com.troubadorian.streamradio.controller.IHRControllerList;
+import com.troubadorian.streamradio.controller.R;
+import com.troubadorian.streamradio.model.IHRCache;
+import com.troubadorian.streamradio.model.IHRPremiumChannel;
+import com.troubadorian.streamradio.model.IHRPremiumItem;
+import com.troubadorian.streamradio.model.IHRStation;
+
+public class IHRArchiveCursor extends IHRThreeLineCursor
+{
+    public static IHRHashtable sDurations;
+
+    public IHRPremiumChannel mChannel;
+
+    public boolean mOffline;
+
+    IHRArchiveCursorAdapter _adapter;
+
+    private int[] _mapping;
+
+    /*
+     * _mapping
+     * 
+     * > 0 - index of rss item < 0 - index of rss item for header = 0 - index of
+     * live stream
+     */
+
+    public IHRArchiveCursor()
+    {
+        super();
+    }
+
+    public IHRArchiveCursor(String inSite)
+    {
+        super();
+        setContentsBySite(inSite);
+    }
+
+    public void setContentsBySite(String inSite)
+    {
+        IHRConfigurationClient client = IHRConfigurationClient.shared();
+
+        mOffline = client.isOffline();
+        mChannel = client.fetchChannel(inSite);
+        mContents = client.fetchPremiumItems(inSite);
+        mCursorCount = prepareMapping();
+    }
+
+    public IHRPremiumItem premiumItemForPosition(int inPosition)
+    {
+        int mapped = (null == _mapping) ? 0 : _mapping[inPosition];
+
+        return (mapped > 0) ? (IHRPremiumItem) mContents.get(mapped - 1) : null;
+    }
+
+    public int prepareMapping()
+    {
+        int index, count = mContents.size();
+        int found, tally = 0;
+
+        IHRPremiumItem item;
+        String name;
+        String prefix = null;
+
+        _mapping = new int[count * 2 + 1];
+
+        if (!mOffline)
+        {
+            _mapping[tally++] = 0; // live
+        }
+
+        for (index = 0; index < count; ++index)
+        {
+            item = (IHRPremiumItem) mContents.get(index);
+            name = item.getName();
+
+            if (null == prefix || !name.startsWith(prefix))
+            {
+                _mapping[tally++] = -index - 1;
+
+                found = name.indexOf("Hour");
+
+                if (found > 1)
+                {
+                    prefix = name.substring(0, found - 1);
+                } else if (null == prefix)
+                {
+                    tally -= 1;
+                } else
+                {
+                    prefix = null;
+                }
+            }
+
+            _mapping[tally++] = index + 1;
+        }
+
+        return tally;
+    }
+
+    @Override
+    public boolean requery()
+    {
+        setContentsBySite(mChannel.getSite());
+
+        return super.requery();
+    }
+
+    @Override
+    public void prepareIntent(Intent intent, int index)
+    {
+        int mapped = (null == _mapping) ? 0 : _mapping[index];
+        IHRStation station = null;
+
+        if (mapped > 0)
+        {
+            IHRPremiumItem item = (IHRPremiumItem) mContents.get(mapped - 1);
+
+            intent.putStringArrayListExtra("archive", item);
+
+            station = mChannel.getStationForItem(item);
+        } else if (mapped == 0)
+        {
+            station = mChannel.getStation();
+        }
+
+        if (null != mChannel)
+        {
+            intent.putExtra("site", mChannel.getSite());
+            intent.putStringArrayListExtra("channel", mChannel);
+        }
+
+        if (null != station)
+        {
+            intent.putExtra("station", station.getCallLetters());
+            intent.putStringArrayListExtra("premium", station);
+        }
+    }
+
+    @Override
+    public String getStringForIndex(int inColumn, int inIndex)
+    {
+        String result = "";
+        int mapped = (null == _mapping) ? 0 : _mapping[inIndex];
+
+        if (mapped > 0)
+        {
+            IHRPremiumItem item = (IHRPremiumItem) mContents.get(mapped - 1);
+            String name;
+
+            switch (inColumn)
+            {
+            case 0:
+                result = item.getName();
+
+                while (--inIndex > 0)
+                {
+                    mapped = _mapping[inIndex];
+
+                    if (mapped < 0)
+                    {
+                        item = (IHRPremiumItem) mContents.get(-mapped - 1);
+                        name = item.getName();
+                        mapped = name.indexOf("Hour");
+
+                        if (mapped > 0
+                                && result.startsWith(name.substring(0, mapped)))
+                        {
+                            result = result.substring(mapped);
+                        }
+
+                        break;
+                    }
+                }
+                break;
+            case 1:
+                result = item.getDescription();
+                break;
+            case 2:
+                result = "-";
+                break; // should be set by applyProgressToRow
+            }
+        } else if (mapped == 0)
+        {
+            String[] string = new String[1];
+
+            switch (inColumn)
+            {
+            // case 0: result = mChannel.getName(); break;
+
+            // the "fix" below ensures that the name of the podcaster isn't
+            // duplicated
+            // TODO: Need to have someone test if this appears elsewhere and/or
+            // makes other parts look off.
+            case 0:
+                result = "Live";
+                break;
+            case 1:
+                result = mChannel.getDescription();
+                break;
+            case 2:
+                mChannel.minutesToShow(0, string);
+                result = string[0];
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    public static int durationForURL(String inURL)
+    {
+        int result = 0;
+
+        if (null == sDurations)
+            sDurations = new IHRHashtable();
+        else
+            result = sDurations.integerValue(inURL, 0);
+
+        if (result == 0)
+        {
+            try
+            {
+                String path = IHRCache.shared().pathForURL(inURL);
+                MediaPlayer player = new MediaPlayer();
+
+                player.setDataSource(path);
+                player.prepare();
+
+                result = player.getDuration();
+
+                player.release();
+                player.reset();
+
+                sDurations.put(inURL, new Integer(result));
+            } catch (Exception e)
+            {
+
+            }
+        }
+
+        return result;
+    }
+
+    public static void applyProgressToRow(int inCurrent, int inMaximum,
+            boolean inPaused, View inRow)
+    {
+        View view;
+        int state = 0;
+
+        if (inCurrent < inMaximum)
+        {
+            state = inPaused ? 2 : 1; // downloading
+        } else if (inMaximum > 0)
+        {
+            state = 3; // downloaded
+        } else
+        {
+            state = 0; // available
+        }
+
+        view = inRow.findViewById(R.id.ThreeLineRowMarker);
+        if (null != view)
+        {
+            view.setVisibility(3 == state ? View.INVISIBLE : View.VISIBLE);
+            if (3 != state)
+                ((ImageView) view)
+                        .setImageResource(0 == state ? R.drawable.download_full
+                                : R.drawable.download_half);
+        }
+
+        view = inRow.findViewById(R.id.ThreeLineRowButton);
+        if (null != view)
+        {
+            view.setEnabled(3 != state);
+            view.setClickable(3 != state);
+            ((ImageView) view)
+                    .setImageResource(3 != state ? 1 == state ? R.drawable.download_pause
+                            : R.drawable.download_begin
+                            : R.drawable.chevron);
+        }
+
+        view = inRow.findViewById(R.id.ThreeLineRowProgress);
+        if (null != view)
+        {
+            view.setVisibility(1 == state || 2 == state ? View.VISIBLE
+                    : View.INVISIBLE);
+            ((ProgressBar) view).setMax(inMaximum > 0 ? inMaximum : 0);
+            ((ProgressBar) view).setProgress(inCurrent);
+        }
+
+        view = inRow.findViewById(R.id.StationsListRowTextLine3);
+        if (null != view)
+        {
+            String text = "";
+
+            if (3 == state)
+            {
+                int duration = durationForURL((String) inRow.getTag());
+
+                text = String.format("%02d:%02d", (duration / 60000),
+                        (duration / 1000) % 60);
+            } else if (state > 0)
+            {
+                text = "" + (inCurrent / 1000000) + "."
+                        + (inCurrent % 1000000 / 100000) + "MB";
+            }
+
+            ((TextView) view).setText(text);
+        }
+    }
+
+    public static void applyProgressToRow(IHRHashtable inProgress, View inRow)
+    {
+        int offset = inProgress.integerValue("offset", 0);
+        int length = inProgress.integerValue("length", 0);
+        boolean paused = inProgress.booleanValue("paused", false);
+
+        if (length < 1 && inProgress.booleanValue("queued", false))
+        {
+            length = 1;
+        }
+
+        applyProgressToRow(offset, length, paused, inRow);
+    }
+
+    protected class IHRArchiveCursorAdapter extends SimpleCursorAdapter
+            implements OnTouchListener, OnClickListener
+    {
+        private View[] _views;
+
+        public IHRArchiveCursorAdapter(Context context, int layout,
+                Cursor cursor, String[] from, int[] to)
+        {
+            super(context, layout, cursor, from, to);
+        }
+
+        @Override
+        public boolean areAllItemsEnabled()
+        {
+            return false;
+        }
+
+        @Override
+        public boolean isEnabled(int position)
+        {
+            int mapped = (null == _mapping) ? 0 : _mapping[position];
+
+            if (mapped == 0 && position == 0)
+            {
+                int minutes = mChannel.minutesToShow(0, null);
+
+                if (minutes < mChannel.tolerance())
+                {
+                    mapped = 1;
+                }
+
+                if (IHRPlatform.isBeingDebugged())
+                {
+                    mapped = 1; // TODO: remove debug code
+                }
+            }
+
+            return (mapped > 0);
+        }
+
+        @Override
+        public int getViewTypeCount()
+        {
+            return 2;
+        }
+
+        @Override
+        public int getItemViewType(int position)
+        {
+            return _mapping[position] < 0 ? 1 : 0;
+        }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent)
+        {
+            View result = (null == _views) ? null : _views[position];
+            int mapped = (null == _mapping) ? 0 : _mapping[position];
+            View view;
+
+            if (null == result)
+            {
+                convertView = null; // work around bug in android 1.5
+
+                if (mapped == 0)
+                {
+                    result = super.getView(position, convertView, parent);
+
+                    view = result.findViewById(R.id.ThreeLineRowMarker);
+                    if (null != view)
+                        view.setVisibility(View.INVISIBLE);
+
+                    // TODO: remove chevron until stream is playing
+                    view = result.findViewById(R.id.ThreeLineRowButton);
+                    if (null != view)
+                        ((ImageView) view).setImageResource(R.drawable.chevron);
+
+                    view = result.findViewById(R.id.ThreeLineRowProgress);
+                    if (null != view)
+                        view.setVisibility(View.GONE);
+
+                    result.setTag(mChannel.get(IHRPremiumChannel.kStreamURL));
+                } else if (mapped < 0)
+                {
+                    IHRViewInfoSeparator separator = (convertView instanceof IHRViewInfoSeparator) ? (IHRViewInfoSeparator) convertView
+                            : new IHRViewInfoSeparator(parent.getContext());
+                    IHRPremiumItem item = (IHRPremiumItem) mContents
+                            .get(-mapped - 1);
+                    String name = item.getName();
+                    int found = name.indexOf("Hour");
+
+                    separator.mLeft.setText(found > 0 ? name.substring(0,
+                            found - 1) : name);
+                    // separator.mRight.setText( "" );
+
+                    IHRControllerList.replaceLayout(separator, 1);
+
+                    result = separator;
+                } else if (mapped > 0)
+                {
+                    IHRPremiumItem item = (IHRPremiumItem) mContents
+                            .get(mapped - 1);
+                    String link = item.getLink();
+
+                    result = super.getView(position, convertView, parent);
+
+                    view = result.findViewById(R.id.ThreeLineRowButton);
+                    if (null != view)
+                    {
+                        view.setOnTouchListener(this);
+                        view.setOnClickListener(this);
+                        view.setTag(new Integer(mapped - 1));
+                    }
+
+                    result.setTag(link);
+
+                    applyProgressToRow(IHRConfigurationClient.shared()
+                            .progressForURL(link), result);
+                }
+
+                // _views[position] = result;
+            }
+
+            return result;
+        }
+
+        public boolean onTouch(View view, MotionEvent event)
+        {
+            boolean result = false;
+
+            if (event.getAction() == MotionEvent.ACTION_UP)
+            {
+                result = true;
+                onClick(view);
+            }
+
+            return result;
+        }
+
+        public void onClick(View view)
+        {
+            IHRConfigurationClient client = IHRConfigurationClient.shared();
+            IHRPremiumItem item = (IHRPremiumItem) mContents
+                    .get(((Integer) view.getTag()).intValue());
+            IHRHashtable progress;
+
+            client.cachePremiumItem(item, true, mChannel.getSite());
+
+            progress = client.progressForURL(item.getLink());
+
+            if (progress.integerValue("length", 0) > 0)
+            {
+                applyProgressToRow(progress, view);
+            } else
+            {
+                applyProgressToRow(0, 1, false, view);
+            }
+        }
+    }
+
+    @Override
+    public SimpleCursorAdapter newAdapter(Context inContext)
+    {
+        IHRArchiveCursorAdapter result = _adapter;
+
+        if (null == result)
+        {
+            result = new IHRArchiveCursorAdapter(inContext, kResourceID, this,
+                    kColumns, kColumnsID);
+
+            _adapter = result;
+        }
+
+        return result;
+    }
+
+}

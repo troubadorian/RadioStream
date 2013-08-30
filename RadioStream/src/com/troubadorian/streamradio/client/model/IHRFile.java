@@ -1,0 +1,30 @@
+package com.troubadorian.streamradio.client.model;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+
+import android.os.Environment;
+
+import com.troubadorian.streamradio.model.IHRObject;
+
+public class IHRFile extends IHRObject {
+	protected FileOutputStream		mOutput;
+
+	// just a writer for now
+	public IHRFile( String name, String mode ) throws IOException {
+		File				file, root;
+		
+		root = Environment.getExternalStorageDirectory();
+		
+		if ( root.canWrite() ) {
+			file = new File( root, name );
+			mOutput = new FileOutputStream( file );
+		}
+	}
+	
+	public void close() { try { mOutput.close(); } catch ( Exception e ) { } }
+	
+	public void write( byte[] buffer ) throws IOException { mOutput.write( buffer ); }
+	public void write( String buffer ) throws IOException { write( buffer.getBytes() ); }
+}

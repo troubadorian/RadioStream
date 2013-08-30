@@ -1,0 +1,85 @@
+package com.troubadorian.streamradio.controller;
+
+import java.util.List;
+
+import android.os.Bundle;
+import android.view.KeyEvent;
+
+import com.troubadorian.streamradio.client.model.IHRConfigurationClient;
+import com.troubadorian.streamradio.client.model.IHRCitiesCursor.IHRCitiesAdapter;
+import com.troubadorian.streamradio.client.view.IHRViewSearch;
+import com.troubadorian.streamradio.model.IHRComparator;
+import com.troubadorian.streamradio.model.IHRQuicksort;
+
+public class IHRControllerCities extends IHRControllerCursorList {
+	protected SearchElement				mElements[];
+	protected IHRViewSearch				mSearch;
+	
+	@Override
+	public void onCreate( Bundle inState ) {
+		super.onCreate( inState );
+		
+//		mList.setFastScrollEnabled( true );
+		
+		/*
+		setContentView( mSearch = new IHRViewSearch( activity() ) );
+		
+		initElements();
+		*/
+	}
+
+	protected void initElements() {
+		IHRConfigurationClient	config;
+		int						i, n;
+		List<String>			names;
+
+		config = IHRConfigurationClient.shared();
+		names = config.fetchCityNames();
+		
+		mElements = new SearchElement[ n = names.size() ];
+		
+		for ( i = 0; i < n; ++i ) {
+			mElements[ i ] = new SearchElement( names.get( i ) , null );
+		}
+		
+//		Arrays.sort( mElements );
+		IHRQuicksort.sort( mElements, IHRComparator.stringComparator() );
+	
+		// update the list view of mSearch with mElements
+	}
+
+	// protected classes 
+	
+	protected static class SearchElement {
+		protected Object			mContext;
+		protected String			mString;
+		protected String			mStringLowercase;
+
+		public SearchElement( String string, Object context ) {
+			mContext = context;
+			mString = string;
+			mStringLowercase = string.toLowerCase();
+		}
+		
+		public Object context() { return mContext; }
+		public String string() { return mString; }
+		@Override
+		public String toString() { return mStringLowercase; }	// for comparator
+	}
+	
+	@Override
+	public boolean onKeyDown( int keyCode , KeyEvent event ) {
+		boolean					result = true;
+		
+		if ( keyCode >= KeyEvent.KEYCODE_A && keyCode <= KeyEvent.KEYCODE_Z /*&& event.getAction() == KeyEvent.ACTION_UP*/ ) {
+			IHRCitiesAdapter	adapter = (IHRCitiesAdapter)mList.getAdapter();
+			
+			mList.setSelectionFromTop( adapter.getPositionForLetter( (char) ( keyCode - KeyEvent.KEYCODE_A + 'A' ) ) , 60 );
+		} else {
+			result = super.onKeyDown( keyCode , event );
+		}
+		
+		return result;
+	}
+	
+}

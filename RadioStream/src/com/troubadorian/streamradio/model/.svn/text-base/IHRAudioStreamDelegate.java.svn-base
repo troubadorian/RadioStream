@@ -1,0 +1,10 @@
+package com.clearchannel.iheartradio.model;
+
+import com.clearchannel.iheartradio.android.model.IHRHashtable;
+
+public interface IHRAudioStreamDelegate {
+	public void audioStreamConnected( Object context, String url );
+	public void audioStreamConnecting( Object context, String url );
+	public void audioStreamReceivedMetadata( Object context, IHRHashtable metadata );
+	public void audioStreamStopped( Object context, String errorReason );
+}

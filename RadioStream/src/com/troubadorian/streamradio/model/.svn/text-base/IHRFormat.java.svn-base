@@ -1,0 +1,118 @@
+package com.clearchannel.iheartradio.model;
+
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+
+import com.clearchannel.iheartradio.android.model.IHRVector;
+
+public class IHRFormat extends ArrayList<String> {
+	public static final String	kAll = "All";
+	
+	private static final long	serialVersionUID	= 1L;
+	
+	public static final int		kName = 0;
+	public static final int		kStationList = 1;
+	
+	public IHRFormat() { super(); }
+	public IHRFormat( IHRFormat inFormat ) { super( inFormat ); }
+	public IHRFormat( Collection<String> inFormat ) { super( inFormat ); }
+	public IHRFormat( String[] inFormat ) { super( Arrays.asList( inFormat ) ); }
+	
+	public String getName() { return get( kName ); }
+	public String getStation( int index ) { return get( index + kStationList ); }
+	public int getStationCount() { return size() - kStationList; }
+	public List<String> copyStationList() { return subList( kStationList , size() ); }
+	public IHRVector getCallLetters() { return new IHRVector( copyStationList() ); }
+	
+	public boolean isValid() { return size() > kStationList && getName().length() > 0; }
+	public static boolean isValid( List<String> inFormat ) { return inFormat.size() > kStationList && inFormat.get( kName ).length() > 0; }
+	
+	public static List parseList( List inFormats ) {
+		IHRVector				result = new IHRVector();
+		int						index , count = ( null == inFormats ) ? 0 : inFormats.size();
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			result.add( new IHRFormat( (Collection<String>)inFormats.get( index ) ) );
+		}
+		
+		return result;
+	}
+	
+	public static IHRFormat parseLine( List<String> inLine , Object inStations ) {
+		IHRFormat				result = null;
+		String					string;
+		int						index , count = ( null == inLine ) ? 0 : inLine.size();
+		
+		if ( count > kStationList && inLine.get( kName ).length() > 0 ) {
+			if ( null == inStations ) {
+				result = new IHRFormat( inLine );
+			} else {
+				result = new IHRFormat();
+				result.add( inLine.get( kName ) );
+				
+				for ( index = kStationList ; index < count ; ++index ) {
+					string = inLine.get( index );
+					
+					if ( ( inStations instanceof Map && ((Map)inStations).containsKey( string ) ) ||
+						( inStations instanceof Collection && ((Collection)inStations).contains( string ) ) ) {
+						result.add( string );
+					}
+				}
+				
+				if ( kStationList == result.size() ) result = null;
+			}
+		}
+		
+		return result;
+	}
+	
+	public static List parseLines( List<List<String>> inLines , int inStart , Object inStations ) {
+		ArrayList<IHRFormat>	result = new ArrayList<IHRFormat>();
+		
+		int						index , count = inLines.size();
+		
+		/**
+		if ( null != inStations ) {
+			IHRFormat			all = new IHRFormat();
+			Iterator			iterator = null;
+			
+			all.add( kAll );
+			
+			if ( inStations instanceof Collection ) iterator = ((Collection)inStations).iterator();
+			else if ( inStations instanceof Map ) iterator = ((Map)inStations).keySet().iterator();
+			
+			while ( iterator.hasNext() ) {
+				String			s = (String)iterator.next();
+				char			c = s.charAt( 0 );
+				
+				if ( c == '!' || c == '#' ) continue;
+				
+				all.add( s );
+			}
+			
+//			if ( inStations instanceof Collection ) all.addAll( (Collection)inStations );
+//			else if ( inStations instanceof Map ) all.addAll( ((Map)inStations).keySet() );
+			
+			if ( inStations instanceof Map ) Collections.sort( all , new IHRStation.NameComparator( (Map)inStations ) );
+			
+			result.add( all );	//	all stations ordered first in list
+		}
+		/**/
+		
+		for ( index = inStart ; index < count ; ++index ) {
+			List<String>		line = inLines.get( index );
+			IHRFormat			format = parseLine( line , inStations );
+			
+			if ( null != format ) {
+				result.add( format );
+			}
+		}
+		
+		return result;
+	}
+	
+}

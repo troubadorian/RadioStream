@@ -1,0 +1,172 @@
+package com.troubadorian.streamradio.model;
+
+//**
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+import com.troubadorian.streamradio.client.model.IHRVector;
+
+public class IHRCity extends ArrayList<String> {
+	private static final long	serialVersionUID	= 1L;
+	
+	public static final int		kName = 0;
+	public static final int		kTrafficURL = 1;
+	public static final int		kStationList = 2;
+	
+	public IHRCity() { super(); }
+	public IHRCity( IHRCity inCity ) { super( inCity ); }
+	public IHRCity( Collection<String> inCity ) { super( inCity ); }
+	
+	public String getName() { return get( kName ); }
+	public String getTrafficURL() { return get( kTrafficURL ); }
+	public String getStation( int index ) { return get( index + kStationList ); }
+	public int getStationCount() { return size() - kStationList; }
+	public List<String> copyStationList() { return subList( kStationList , size() ); }
+	public IHRVector getCallLetters() { return new IHRVector( copyStationList() ); }
+	
+	public boolean isValid() { return size() > kStationList && getName().length() > 0; }
+	public static boolean isValid( ArrayList<String> inCity ) { return inCity.size() > kStationList && inCity.get( kName ).length() > 0; }
+	
+	public static List parseList( List inCities ) {
+		IHRVector				result = new IHRVector();
+		int						index , count = ( null == inCities ) ? 0 : inCities.size();
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			result.add( new IHRCity( (Collection<String>)inCities.get( index ) ) );
+		}
+		
+		return result;
+	}
+	
+	public static IHRCity parseLine( List<String> inLine , Object inStations , boolean inAllowEmpty ) {
+		IHRCity					result = null;
+		String					string;
+		int						index , count = ( null == inLine ) ? 0 : inLine.size();
+		
+		if ( count > kStationList && inLine.get( kName ).length() > 0 ) {
+			if ( null == inStations ) {
+				result = new IHRCity( inLine );
+			} else {
+				result = new IHRCity();
+				result.add( inLine.get( kName ) );
+				result.add( inLine.get( kTrafficURL ) );
+				
+				for ( index = kStationList ; index < count ; ++index ) {
+					string = inLine.get( index );
+					if ( ( inStations instanceof Map && ((Map)inStations).containsKey( string ) ) ||
+						( inStations instanceof Collection && ((Collection)inStations).contains( string ) ) ) {
+						result.add( string );
+					}
+				}
+				
+				if ( kStationList == result.size() && !inAllowEmpty ) result = null;
+				else if ( 0 == result.getName().length() ) result = null;
+			}
+		}
+		
+		return result;
+	}
+	
+	public static List parseLines( List<List<String>> inLines , int inStart , Object inStations ) {
+		ArrayList<IHRCity>		result = new ArrayList<IHRCity>();
+		
+		int						index , count = inLines.size();
+		int						display_national_stations_in_city_list = 0;
+		int						display_national_stations_in_each_city = 0;
+		int						national_index = 0;
+		IHRCity					national = null;
+		
+		List<String>			line;
+		IHRCity					city;
+		
+		if ( count > inStart ) {
+			if ( inStart > 1 ) display_national_stations_in_city_list = Integer.valueOf( inLines.get( 0 ).get( 0 ) );
+			if ( inStart > 2 ) display_national_stations_in_each_city = Integer.valueOf( inLines.get( 1 ).get( 0 ) );
+		}
+		
+		for ( index = inStart ; index < count ; ++index ) {
+			line = inLines.get( index );
+			city = parseLine( line , inStations , display_national_stations_in_each_city > 0 );
+			
+			if ( null != city ) {
+				if ( null == national && city.getName().equalsIgnoreCase( "national" ) ) { national = city; national_index = result.size(); }
+				else result.add( city );
+			}
+		}
+		
+		if ( null != national ) {
+			count = result.size();
+			
+			switch ( display_national_stations_in_each_city ) {
+			case 1:	//	before
+				for ( index = 0 ; index < count ; ++index ) {
+					result.get( index ).addAll( kStationList , national.copyStationList() );
+				}
+				break;
+			case 2:	//	sorted
+				for ( index = 0 ; index < count ; ++index ) {
+					city = result.get( index );
+					line = national.copyStationList();
+					line.addAll( city.copyStationList() );
+					
+					Collections.sort( line );	//	sort by call letters
+					
+					city.removeRange( kStationList , city.size() );
+					city.addAll( line );
+				}
+				break;
+			case 3:	//	follow
+				for ( index = 0 ; index < count ; ++index ) {
+					result.get( index ).addAll( national.copyStationList() );
+				}
+				break;
+			}
+			
+			switch ( display_national_stations_in_city_list ) {
+			case 1:	//	before
+				result.add( 0 , national );
+				break;
+			case 2:	//	sorted
+				result.add( national_index , national );
+				break;
+			case 3:	//	follow
+				result.add( national );
+				break;
+			}
+		}
+		
+		return result;
+	}
+	
+}
+/*/
+import com.clearchannel.iheartradio.android.model.IHRVector;
+
+public class IHRCity extends IHRObject {
+	public IHRVector					mCallLetters;
+	public String						mName;
+	public String						mTrafficURL;
+
+	public IHRCity() {
+		mCallLetters = new IHRVector();
+	}
+	
+	public IHRCity( String name, String trafficUrl, IHRVector stations ) throws Exception {
+		mCallLetters = stations;
+		mName = name;
+		mTrafficURL = trafficUrl;
+		
+		if ( ! isValid() ) throw new Exception( "invalid city" );
+	}
+	
+	public boolean isValid() {
+		if ( mName == null || mName.length() == 0 ) return false;
+		if ( mCallLetters.size() == 0 ) return false;
+		
+		return true;
+	}
+}
+/**/

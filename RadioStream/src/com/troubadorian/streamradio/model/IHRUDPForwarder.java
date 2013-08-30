@@ -1,0 +1,100 @@
+package com.troubadorian.streamradio.model;
+
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.nio.ByteBuffer;
+
+public class IHRUDPForwarder extends IHRByteStreamModifier implements Runnable {
+	protected boolean					mClosed;
+	protected InetAddress				mLocalAddress;
+	protected int						mLocalPort;
+	protected InetAddress				mRemoteHost;
+	protected int						mRemotePort;
+	protected DatagramSocket			mSocket;
+
+	// localhost:localPort <-> socket <-> remoteHost:remotePort
+	public IHRUDPForwarder( DatagramSocket socket, int localPort, String remoteHost, int remotePort ) throws Exception {
+		mLocalAddress = InetAddress.getByName( "127.0.0.1" );
+		mLocalPort = localPort;
+		mRemoteHost = InetAddress.getByName( remoteHost );
+		mRemotePort = remotePort;
+		mSocket = socket;
+	}
+	
+	public void open() {
+		Thread				t = new Thread( this );
+		
+		t.setName( this.getClass().getSimpleName() );
+		t.start();
+	}
+	
+	public void close() {
+		synchronized( this ) {
+			if ( mClosed ) return;
+			
+			mClosed = true;
+		}
+		
+		if ( mSocket != null ) try { mSocket.close(); } catch ( Exception e ) { }
+
+		mSocket = null;
+	}
+	
+	public int getPort() {
+		return mSocket == null ? -1 : mSocket.getLocalPort();
+	}
+	
+	public void run() {
+		byte[]						buffer;
+		ByteBuffer					byteBuffer;		
+		DatagramPacket				packet;
+		int							source;
+		
+		try {
+			buffer = new byte[ 65536 ];
+
+			while ( ! mClosed ) {
+				packet = new DatagramPacket( buffer, buffer.length );
+				
+				mSocket.receive( packet );
+				
+				source = getPacketSource( packet );
+				byteBuffer = modifyByteStream( source, packet.getData(), packet.getLength(), true );
+				packet.setData( byteBuffer.array(), 0, byteBuffer.limit() );
+				
+				if ( source == kDataSourceLocal ) sendToRemoteHost( packet );
+				else sendToLocalHost( packet );
+			}
+		} catch ( Exception e ) {
+			log( "run", "error: " + e.toString() );
+		}
+
+		close();
+	}
+	
+	// protected methods
+
+	protected int getPacketSource( DatagramPacket packet ) {
+		return packet.getAddress().getHostAddress().equals( "127.0.0.1" ) ? kDataSourceLocal : kDataSourceRemote;
+	}
+	
+	protected void sendToLocalHost( DatagramPacket packet ) throws Exception {
+		packet.setAddress( mLocalAddress );
+		packet.setPort( mLocalPort );
+
+//		log( "sendToLocalHost", "sending " + packet.getLength() + " bytes " +
+//			( packet.getLength() > 1 ? ( packet.getData()[ 1 ] == 1 ? "RTCP" : "RTP" ) : "" ) +
+//			" from " + mRemoteHost.getHostAddress() + ":" + mRemotePort +
+//			" to " + mLocalAddress.getHostAddress() + ":" + mLocalPort );
+		
+		if ( null != mSocket ) mSocket.send( packet );
+	}
+	
+	protected void sendToRemoteHost( DatagramPacket packet ) throws Exception {
+		packet.setAddress( mRemoteHost );
+		packet.setPort( mRemotePort );
+		
+		if ( null != mSocket ) mSocket.send( packet );
+	}
+}

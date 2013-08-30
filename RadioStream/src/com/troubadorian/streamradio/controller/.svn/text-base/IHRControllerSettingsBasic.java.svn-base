@@ -1,0 +1,33 @@
+package com.clearchannel.iheartradio.controller;
+
+import android.view.View;
+import android.widget.ListView;
+
+import com.clearchannel.iheartradio.android.model.IHRConfigurationClient;
+
+public class IHRControllerSettingsBasic extends IHRControllerSettings {
+	public static final String[]kNames = { "Clear Autoplay Station" };
+	
+	@Override
+	public int getCount() {
+		return kNames.length;
+	}
+	
+	@Override
+	public String getString( int inPosition ) {
+		return kNames[inPosition];
+	}
+	
+	@Override
+	protected void onListItemClick( ListView inList , View inView , int inPosition , long inID ) {
+		switch ( inPosition ) {
+		case 0:
+			String msg = "Your autoplay station has been cleared";
+			showToast(msg);//show Toast
+			//don’t go back to its parent
+			//activity().popToRoot();
+			break;
+		}
+	}
+
+}

@@ -1,0 +1,50 @@
+package com.clearchannel.iheartradio.controller;
+
+import android.content.Context;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.View.OnClickListener;
+import android.widget.ImageView;
+import android.widget.ListView;
+
+import com.clearchannel.iheartradio.android.view.IHRViewFavorites;
+
+public class IHRControllerFavorites extends IHRControllerHeaderList implements OnClickListener {
+	
+	@Override
+	protected ListView createListView() {
+		return new IHRViewFavorites( activity() );
+	}
+	
+	protected View createHeaderView( int inID ) {
+		ImageView				result = new ImageView( activity() );
+		
+		result.setImageResource( inID );
+		result.setBackgroundResource( R.drawable.player_header_1x34px_bg_grey );
+		result.setAdjustViewBounds( true );
+		result.setOnClickListener( this );
+		
+		return result;
+	}
+	
+	@Override
+	protected View createHeaderView() {
+		return createHeaderView( R.drawable.favorites_segment_stations_selected );
+	}
+	
+	public void onClick( View inView ) {
+		((IHRActivity)activity()).pushTagged();
+	}
+	
+	//	for identification by IHRViewMain
+	public class IHRFavorites extends IHRHeaderContainer {
+		public IHRFavorites( Context context ) { super( context ); }
+	}
+	
+	@Override
+	protected ViewGroup createContainerView() {
+		return new IHRFavorites( activity() );
+	}
+	
+	
+}

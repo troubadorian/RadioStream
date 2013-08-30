@@ -1,0 +1,7 @@
+package com.clearchannel.iheartradio.model;
+
+import com.clearchannel.iheartradio.android.model.IHRHashtable;
+
+public interface IHRListener {
+	public void listen( String inName , IHRHashtable inDetails );
+}

@@ -1,0 +1,61 @@
+package com.troubadorian.streamradio.client.model;
+
+import java.net.URI;
+import java.nio.ByteBuffer;
+
+import com.troubadorian.streamradio.model.IHRTCPForwarder;
+import com.troubadorian.streamradio.model.IHRUtilities;
+
+public class IHRHTTPModifier extends IHRTCPForwarder {
+	byte[]						mCache;
+	boolean						mSentHeaders;
+	
+	public IHRHTTPModifier( URI uri ) throws Exception {
+		super( uri );
+		
+		open();
+	}
+	
+	protected ByteBuffer modifyByteStream( int dataSource, byte[] bytes, int length, boolean returnCopy ) throws Exception {
+		byte[]							buffer;
+		int								i, n;
+		String							string;
+
+//		dump( "modify " + ( dataSource == kDataSourceLocal ? "local" : "remote" ) + " stream", bytes, 0, length );
+		
+		if ( dataSource == kDataSourceLocal ) {
+			if ( ! mSentHeaders ) {
+				if ( mCache != null ) {
+					bytes = concatenateBuffers( mCache, 0, mCache.length, bytes, 0, length );
+					length = bytes.length;
+					
+					mCache = null;
+				}
+				
+				for ( i = 0, n = length - 4; i <= n; ++i ) {
+					if ( bytes[ i ] == '\r' && bytes[ i + 1 ] == '\n' && bytes[ i + 2 ] == '\r' && bytes[ i + 3 ] == '\n' ) break;
+				}
+	
+				if ( i > n ) {
+					mCache = IHRUtilities.copyBuffer( bytes, 0, length );
+					return null;
+				}
+				
+				string = new String( bytes, 0, i, "ISO-8859-1" );
+				
+				string = string.replaceFirst( "HTTP/1.1", "HTTP/1.0" );
+				string = string.replaceFirst( "Host:[^\r]*", "Host: " + mRemoteHost + ":" + mRemotePort );
+				
+				buffer = string.getBytes( "ISO-8859-1" );
+				
+				bytes = concatenateBuffers( buffer, 0, buffer.length, bytes, i, length - i );
+				length = bytes.length;
+				returnCopy = false;
+				
+				mSentHeaders = true;
+			}
+		}
+		
+		return super.modifyByteStream( dataSource, bytes, length, returnCopy );
+	}
+}

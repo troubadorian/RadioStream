@@ -1,0 +1,55 @@
+package com.clearchannel.iheartradio.android.model;
+
+import android.content.Intent;
+
+import com.clearchannel.iheartradio.controller.IHRControllerPremiumAccounts;
+import com.clearchannel.iheartradio.controller.IHRControllerPremiumArchives;
+import com.clearchannel.iheartradio.model.IHRPremiumChannel;
+
+public class IHRPremiumCursor extends IHRTwoLineCursor {
+	
+	@Override
+	public boolean requery() {
+		setContents( IHRConfigurationClient.shared().fetchPremiumChannels() );
+		
+		return super.requery();
+	}
+	
+	public String getStringForObject( int inColumn , Object inObject ) {
+		String					result = null;
+		
+		result = ( 0 == inColumn ) ? ((IHRPremiumChannel)inObject).getName() : ((IHRPremiumChannel)inObject).getDescription();
+		
+		return result;
+	}
+	
+	@Override
+	public void prepareIntent( Intent intent , int index ) {
+		if ( index >= 0 && index < mCursorCount ) {
+			Object				object = mContents.get( index );
+			String				site = ((IHRPremiumChannel)object).getSite();
+			
+			if ( IHRConfigurationClient.shared().siteHasAuthenticated( site ) ) {
+				intent.putExtra( "class" , IHRControllerPremiumArchives.class.getName() );
+				intent.putExtra( "source" , "premium" );
+				intent.putExtra( "site" , site );
+			} else {
+				intent.putExtra( "class" , IHRControllerPremiumAccounts.class.getName() );
+				intent.putExtra( "source" , "premium_accounts" );
+				intent.putExtra( "site" , site );
+			}
+		}
+	}
+	
+	@Override
+	public String getStringForIndex( int inColumn , int inIndex ) {
+		String					result = null;
+		
+		if ( inIndex >= 0 && inIndex < mCursorCount ) {
+			result = getStringForObject( inColumn , mContents.get( inIndex ) );
+		}
+		
+		return result;
+	}
+	
+}

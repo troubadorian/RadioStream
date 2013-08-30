@@ -1,0 +1,81 @@
+package com.clearchannel.iheartradio.controller;
+
+import android.content.Context;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewGroup.LayoutParams;
+
+public class IHRControllerHeaderList extends IHRControllerCursorList {
+	public View					mHeader;
+	public ViewGroup			mLayout;
+	
+	public class IHRHeaderContainer extends ViewGroup {
+		public IHRHeaderContainer( Context context ) { super( context ); }
+		
+		@Override
+		public void onMeasure( int inMeasureWidth , int inMeasureHeight ) {
+			this.setMeasuredDimension( MeasureSpec.getSize( inMeasureWidth ) , MeasureSpec.getSize( inMeasureHeight ) );
+			
+			if ( null != mHeader ) {
+				mHeader.measure( inMeasureWidth , inMeasureHeight );
+				
+				inMeasureHeight = MeasureSpec.makeMeasureSpec( MeasureSpec.getSize( inMeasureHeight ) - mHeader.getMeasuredHeight() , MeasureSpec.EXACTLY );
+			}
+			
+			mList.measure( inMeasureWidth , inMeasureHeight );
+		}
+		
+		@Override
+		public void onLayout( boolean inChanged , int inLeft , int inTop , int inRight , int inBottom ) {
+			inBottom -= inTop;
+			inRight -= inLeft;
+			inLeft = 0;
+			inTop = 0;
+			
+			if ( null != mHeader ) {
+				mHeader.layout( inLeft , inTop , inRight , inTop += mHeader.getMeasuredHeight() );
+			}
+			
+			mList.layout( inLeft , inTop , inRight , inBottom );
+		}
+	}
+	
+	protected ViewGroup createContainerView() {
+		return new IHRHeaderContainer( activity() );
+	}
+	
+	protected View createHeaderView() {
+		return null;
+	}
+	
+	protected void prepareHeaderView() {
+		if ( null == mHeader ) {
+			mHeader = createHeaderView();
+		}
+		
+		if ( null != mHeader ) {
+			mHeader.setLayoutParams( new LayoutParams( ViewGroup.LayoutParams.FILL_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT ) );
+		}
+	}
+	
+	@Override
+	protected void prepareView() {
+		ViewGroup				content;
+		
+		prepareListView();
+		prepareHeaderView();
+		
+		if ( null == mHeader ) {
+			content = mList;
+		} else {
+			mLayout = createContainerView();
+			mLayout.addView( mHeader );
+			mLayout.addView( mList );
+			
+			content = mLayout;
+		}
+		
+		setContentView( content );
+	}
+
+}

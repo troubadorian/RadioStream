@@ -1,0 +1,257 @@
+package com.troubadorian.streamradio.client.model;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.security.MessageDigest;
+
+import javax.xml.parsers.SAXParser;
+import javax.xml.parsers.SAXParserFactory;
+
+import org.xml.sax.helpers.DefaultHandler;
+
+import android.content.Context;
+import android.os.Build;
+import android.os.Debug;
+import android.os.Looper;
+import android.telephony.TelephonyManager;
+import android.view.WindowManager;
+
+import com.troubadorian.streamradio.controller.Streamradio;
+
+public class IHRPlatform {
+	public static Context context() { return Streamradio.g; }
+	public static Object manager( String inService ) { return context().getSystemService( inService ); }
+	public static WindowManager windowManager() { return ((WindowManager)manager(Context.WINDOW_SERVICE)); }
+	public static TelephonyManager telephonyManager() { return ((TelephonyManager)manager(Context.TELEPHONY_SERVICE)); }
+	
+	public static String getDeviceId() { return telephonyManager().getDeviceId(); }
+	public static String getDeviceName() { return Build.MODEL; }
+	public static String getSoftwareVersion() { return Build.VERSION.RELEASE; }
+	public static String getCurrentNetworkName() { return telephonyManager().getNetworkOperatorName().replace("&", ""); }
+	
+	public static int screenWidth() { return windowManager().getDefaultDisplay().getWidth(); }
+	public static int screenHeight() { return windowManager().getDefaultDisplay().getHeight(); }
+	public static int screenOrientation() { return windowManager().getDefaultDisplay().getOrientation(); }
+	
+	//	isSimulator - guess if emulator or physical device - not future proof
+//	public static boolean isSimulator() { return ((SensorManager)manager( Context.SENSOR_SERVICE )).getSensorList( Sensor.TYPE_ALL ).isEmpty(); }
+	public static boolean isSimulator() { return Debug.isDebuggerConnected(); }
+//	public static boolean isDevelopment() { return Config.DEBUG; }
+	public static boolean isBeingDebugged() { return Debug.isDebuggerConnected(); }
+	
+	public static String toHexString( byte[] inBuffer , int inOffset , int inLength ) {
+		String				result;
+		String				string;
+		int					length;
+		
+		for ( result = "" ; inOffset < inLength ; ++inOffset ) {
+			string = Integer.toHexString( inBuffer[inOffset] & 0x00FF );
+			length = string.length();
+			result += ( length != 2 ) ? ( length > 2 ) ? string.substring( length - 2 ) : "0" + string : string;
+		}
+		
+		return result;
+	}
+	
+	public static String SHA1String( byte[] inBytes , int inOffset , int inLength ) {
+		String				result = null;
+		
+		try {
+			MessageDigest	digest = MessageDigest.getInstance( "SHA1" );
+			byte[]			buffer;
+			
+			digest.update( inBytes , inOffset , inLength );
+			
+			buffer = digest.digest();
+			result = toHexString( buffer , 0 , buffer.length );
+		} catch ( Exception e ) {}
+		
+		return result;
+	}
+	
+	public static byte[] SHA1Digest( byte[] inBytes , int inOffset , int inLength ) {
+		byte[]				result = null;
+		
+		try {
+			MessageDigest	digest = MessageDigest.getInstance( "SHA1" );
+			
+			digest.update( inBytes , inOffset , inLength );
+			
+			result = digest.digest();
+		} catch ( Exception e ) {}
+		
+		return result;
+	}
+	
+	public static boolean parseXML( InputStream stream, DefaultHandler handler ) {
+		boolean result = true;
+		
+		try {
+			//	could have static factory
+			SAXParserFactory factory = SAXParserFactory.newInstance();
+			SAXParser parser = factory.newSAXParser();
+			
+			parser.parse( stream , handler);
+		} catch ( Exception e ) {
+			result = false;
+		}
+		
+		return result;
+	}
+	
+	public static boolean parseXML( byte[] bytes , DefaultHandler handler ) throws IOException {
+		if ( bytes == null ) return false;
+		
+		return parseXML( new ByteArrayInputStream( bytes ) , handler );
+	}
+	
+	public static boolean isMainThread() {
+		return Thread.currentThread().getId() == Looper.getMainLooper().getThread().getId();
+	}
+	
+	/**
+	public static void dumpConstants() {
+		String tag = "Constants";
+		
+		Log.d( tag , "Build.BOARD = " + Build.BOARD );
+		Log.d( tag , "Build.BRAND = " + Build.BRAND );
+		Log.d( tag , "Build.DEVICE = " + Build.DEVICE );
+		Log.d( tag , "Build.DISPLAY = " + Build.DISPLAY );
+		Log.d( tag , "Build.FINGERPRINT = " + Build.FINGERPRINT );
+		Log.d( tag , "Build.HOST = " + Build.HOST );
+		Log.d( tag , "Build.ID = " + Build.ID );
+		Log.d( tag , "Build.MODEL = " + Build.MODEL );
+		Log.d( tag , "Build.PRODUCT = " + Build.PRODUCT );
+		Log.d( tag , "Build.TAGS = " + Build.TAGS );
+		Log.d( tag , "Build.TIME = " + Build.TIME );
+		Log.d( tag , "Build.TYPE = " + Build.TYPE );
+		Log.d( tag , "Build.USER = " + Build.USER );
+		Log.d( tag , "Build.VERSION.INCREMENTAL = " + Build.VERSION.INCREMENTAL );
+		Log.d( tag , "Build.VERSION.RELEASE = " + Build.VERSION.RELEASE );
+		Log.d( tag , "Build.VERSION.SDK = " + Build.VERSION.SDK );
+		Log.d( tag , "Config.DEBUG = " + Config.DEBUG );
+//		Log.d( tag , "Config.PROFILE = " + Config.PROFILE );
+//		Log.d( tag , "Config.RELEASE = " + Config.RELEASE );
+//		Log.d( tag , "Config.LOGD = " + Config.LOGD );
+//		Log.d( tag , "Config.LOGV = " + Config.LOGV );
+		Log.d( tag , "Debug.isDebuggerConnected() = " + Debug.isDebuggerConnected() );
+		Log.d( tag , "Environment.getExternalStorageState() = " + Environment.getExternalStorageState() );
+		Log.d( tag , "Environment.getDataDirectory() = " + Environment.getDataDirectory().getAbsolutePath() );
+		Log.d( tag , "Environment.getDownloadCacheDirectory() = " + Environment.getDownloadCacheDirectory().getAbsolutePath() );
+		Log.d( tag , "Environment.getExternalStorageDirectory() = " + Environment.getExternalStorageDirectory().getAbsolutePath() );
+		Log.d( tag , "Environment.getRootDirectory() = " + Environment.getRootDirectory().getAbsolutePath() );
+		Log.d( tag , "Process.myPid() = " + Process.myPid() );
+		Log.d( tag , "Process.myTid() = " + Process.myTid() );
+		Log.d( tag , "Process.myUid() = " + Process.myUid() );
+		Log.d( tag , "Process.supportsProcesses() = " + Process.supportsProcesses() );
+	}
+	
+	public static void dumpConfiguration( Configuration inConfiguration ) {
+		String tag = "Configuration";
+		
+		if ( null == inConfiguration ) {
+			inConfiguration = new Configuration();
+			inConfiguration.setToDefaults();
+		}
+		
+		Log.d( tag , "Configuration.fontScale = " + inConfiguration.fontScale );
+		Log.d( tag , "Configuration.hardKeyboardHidden = " + inConfiguration.hardKeyboardHidden );
+		Log.d( tag , "Configuration.keyboard = " + inConfiguration.keyboard );
+		Log.d( tag , "Configuration.keyboardHidden = " + inConfiguration.keyboardHidden );
+		Log.d( tag , "Configuration.mcc = " + inConfiguration.mcc );
+		Log.d( tag , "Configuration.mnc = " + inConfiguration.mnc );
+		Log.d( tag , "Configuration.navigation = " + inConfiguration.navigation );
+		Log.d( tag , "Configuration.orientation = " + inConfiguration.orientation );
+		Log.d( tag , "Configuration.touchscreen = " + inConfiguration.touchscreen );
+	}
+	
+	public static void dumpScreen( Display inDisplay ) {
+		String tag = "Screen";
+		DisplayMetrics metrics = new DisplayMetrics();
+		
+		if ( null == inDisplay ) {
+			inDisplay = windowManager().getDefaultDisplay();
+		}
+		
+		if ( null == inDisplay ) {
+			metrics.setToDefaults();
+		} else {
+			inDisplay.getMetrics( metrics );
+		}
+		
+		Log.d( tag , "Display.getDisplayId() = " + inDisplay.getDisplayId() );
+		Log.d( tag , "Display.getHeight() = " + inDisplay.getHeight() );
+		Log.d( tag , "Display.getOrientation() = " + inDisplay.getOrientation() );
+		Log.d( tag , "Display.getPixelFormat() = " + inDisplay.getPixelFormat() );
+		Log.d( tag , "Display.getRefreshRate() = " + inDisplay.getRefreshRate() );
+		Log.d( tag , "Display.getWidth() = " + inDisplay.getWidth() );
+		Log.d( tag , "DisplayMetrics.heightPixels = " + metrics.heightPixels );
+		Log.d( tag , "DisplayMetrics.widthPixels = " + metrics.widthPixels );
+		Log.d( tag , "DisplayMetrics.density = " + metrics.density );
+		Log.d( tag , "DisplayMetrics.scaledDensity = " + metrics.scaledDensity );
+		Log.d( tag , "DisplayMetrics.xdpi = " + metrics.xdpi );
+		Log.d( tag , "DisplayMetrics.ydpi = " + metrics.ydpi );
+	}
+	
+	public static void dumpTelephony() {
+		String tag = "Telephony";
+		
+		try {
+			TelephonyManager telephony = telephonyManager();
+			
+			Log.d( tag , "Telephony.getCallState() = " + telephony.getCallState() );
+			Log.d( tag , "Telephony.getDataActivity() = " + telephony.getDataActivity() );
+			Log.d( tag , "Telephony.getDataState() = " + telephony.getDataState() );
+			Log.d( tag , "Telephony.getNetworkCountryIso() = " + telephony.getNetworkCountryIso() );
+			Log.d( tag , "Telephony.getNetworkOperator() = " + telephony.getNetworkOperator() );
+			Log.d( tag , "Telephony.getNetworkOperatorName() = " + telephony.getNetworkOperatorName() );
+			Log.d( tag , "Telephony.getNetworkType() = " + telephony.getNetworkType() );
+			Log.d( tag , "Telephony.getPhoneType() = " + telephony.getPhoneType() );
+			Log.d( tag , "Telephony.getSimCountryIso() = " + telephony.getSimCountryIso() );
+			Log.d( tag , "Telephony.getSimOperator() = " + telephony.getSimOperator() );
+			Log.d( tag , "Telephony.getSimOperatorName() = " + telephony.getSimOperatorName() );
+			Log.d( tag , "Telephony.getSimState() = " + telephony.getSimState() );
+			
+			//	require READ_PHONE_STATE
+			Log.d( tag , "Telephony.getDeviceId() = " + telephony.getDeviceId() );
+			Log.d( tag , "Telephony.getDeviceSoftwareVersion() = " + telephony.getDeviceSoftwareVersion() );
+			Log.d( tag , "Telephony.getLine1Number() = " + telephony.getLine1Number() );
+			Log.d( tag , "Telephony.getSimSerialNumber() = " + telephony.getSimSerialNumber() );
+			Log.d( tag , "Telephony.getSubscriberId() = " + telephony.getSubscriberId() );
+			Log.d( tag , "Telephony.getVoiceMailAlphaTag() = " + telephony.getVoiceMailAlphaTag() );
+			Log.d( tag , "Telephony.getVoiceMailNumber() = " + telephony.getVoiceMailNumber() );
+		} catch ( Exception e ) {}
+	}
+	
+	@SuppressWarnings( "unchecked" )
+	public static void dumpSystem() {
+		String tag = "System";
+		
+		Set entries;
+		Iterator iterator;
+		Map.Entry entry;
+		
+		tag = "System.getenv()";
+		entries = System.getenv().entrySet();
+		iterator = entries.iterator();
+		
+		while ( iterator.hasNext() ) {
+			entry = (Map.Entry)iterator.next();
+			Log.d( tag , entry.getKey().toString() + " = " + entry.getValue().toString() );
+//			Log.d( tag , iterator.next().toString() );
+		}
+		
+		tag = "System.getProperties()";
+		entries = System.getProperties().entrySet();
+		iterator = entries.iterator();
+		
+		while ( iterator.hasNext() ) {
+			entry = (Map.Entry)iterator.next();
+			Log.d( tag , entry.getKey().toString() + " = " + entry.getValue().toString() );
+//			Log.d( tag , iterator.next().toString() );
+		}
+	}
+	/**/
+	
+}

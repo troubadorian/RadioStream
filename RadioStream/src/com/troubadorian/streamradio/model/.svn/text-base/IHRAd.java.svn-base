@@ -1,0 +1,308 @@
+package com.clearchannel.iheartradio.model;
+
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.os.Handler;
+import android.util.Log;
+
+import com.clearchannel.iheartradio.android.model.IHRConfigurationClient;
+import com.clearchannel.iheartradio.android.model.IHRHashtable;
+import com.clearchannel.iheartradio.android.model.IHRPlayerClient;
+import com.clearchannel.iheartradio.android.model.IHRVector;
+import com.clearchannel.iheartradio.android.view.IHRViewBanner;
+
+public class IHRAd extends IHRObject {
+	public static final int				kAdTypeNone = 0;
+	public static final int				kAdTypeBanner = 1;
+	public static final int				kAdTypePlayer = 2;
+	public static final int				kAdTypeSplash = 4;
+	public static final int				kAdTypeStream = 8;
+
+	public static final int				kAdPurposeClickBanner = 1;
+	public static final int				kAdPurposeClickPlayerLarge = 2;
+	public static final int				kAdPurposeClickPlayerSmall = 3;
+	public static final int				kAdPurposeClickStream = 4;
+	public static final int				kAdPurposeImpressionBanner = 5;
+	public static final int				kAdPurposeImpressionBannerSecondary = 6;
+	public static final int				kAdPurposeImpressionPlayerLarge = 7;
+	public static final int				kAdPurposeImpressionPlayerSmall = 8;
+	public static final int				kAdPurposeImpressionSplash = 9;
+	public static final int				kAdPurposeImpressionStream = 10;
+
+	public static final int				kMessageAdAcquired = IHRUtilities.osType( "AdAq" );
+	
+	protected static final int			kAdPurposeRequestBanner = 11;
+	protected static final int			kAdPurposeRequestPlayer = 12;
+	protected static final int			kAdPurposeRequestSplash = 13;
+	protected static final int			kAdPurposeRequestStream = 14;
+
+	public IHRHashtable					mAdBanner;
+	public IHRHashtable					mAdPlayer;
+	public int							mBannerHeight;
+	public int							mBannerWidth;
+	public Object						mContextPlayer;
+	public Handler						mHandlerBanner;
+	public Handler						mHandlerPlayer;
+	public int							mPlayerLargeHeight;
+	public int							mPlayerLargeWidth;
+	public int							mPlayerSmallHeight;
+	public int							mPlayerSmallWidth;
+	public long[]						mNoAds;
+	
+	protected Report					mReport = new Report();
+	protected int						mRequestsInProgress;
+
+	protected static IHRAd				sSingleton;
+
+	public static IHRAd shared() {
+		if ( sSingleton == null ) sSingleton = new IHRAd();
+
+		return sSingleton;
+	}
+
+	public void report( int purpose ) {
+		mReport.report( purpose );
+	}
+
+	public synchronized IHRHashtable request( int type, Object context ) {
+		IHRHashtable			result = null;
+
+		// if we're already trying to fetch an ad of this type, return.
+		//
+		// kind of an after-the-fact hack here, but I only want to return player
+		// ads if the station upon delivery matches the station upon request.
+		// if an ad request comes in for a station we're already requesting
+		// an ad for, then it's ok to return.  otherwise we have to ignore the ad
+		// and continue.
+		if ( ( mRequestsInProgress & type ) != 0 ) {
+			switch ( type ) {
+				case kAdTypePlayer: {
+					if ( context == mContextPlayer ) return null;
+				} break;
+
+				default:							return null;
+			}
+		}
+
+		switch ( type ) {
+			case kAdTypeBanner: {
+				if ( mAdBanner != null ) {
+					result = mAdBanner;
+					mAdBanner = null;
+				}
+			} break;
+
+			case kAdTypePlayer: {
+				mContextPlayer = context;
+
+				if ( mAdPlayer != null ) {
+					result = mAdPlayer;
+					mAdPlayer = null;
+				}
+			} break;
+
+			default:		return null;
+		}
+		
+		if ( result == null ) {
+			//	wait at least 10 minutes if last result was no ad
+			if ( System.currentTimeMillis() > ( mNoAds[type] + 600000 ) ) {
+				new Request( type );
+			}
+		}
+		
+		return result;
+	}
+
+	// protected methods
+
+	protected IHRAd() {
+		mBannerHeight = IHRViewBanner.kBannerHeight;
+		mBannerWidth = IHRViewBanner.kBannerWidth;
+		
+		mPlayerLargeHeight = 210;
+		mPlayerLargeWidth = 320;
+		mPlayerSmallHeight = 20;
+		mPlayerSmallWidth = 320;
+		
+		mNoAds = new long[4];
+	}
+
+	protected String adURLForPurpose( int purpose ) {
+		String					adParams, template, url;
+		IHRConfigurationClient	config;
+		IHRStation				station;
+
+		config = IHRConfigurationClient.shared();
+		
+		template = config.adsDartPrefix();
+		if ( null == template || template.length() == 0 ) return null;
+
+		switch ( purpose ) {
+			case kAdPurposeClickBanner:					url = "page_pos_click_banner";					break;
+			case kAdPurposeClickPlayerLarge:			url = "page_pos_click_player_large";			break;
+			case kAdPurposeClickPlayerSmall:			url = "page_pos_click_player_small";			break;
+			case kAdPurposeClickStream:					url = "page_pos_click_stream";					break;
+			case kAdPurposeImpressionBanner:			url = "page_pos_impression_banner";				break;
+			case kAdPurposeImpressionBannerSecondary:	url = "page_pos_impression_banner_secondary";	break;
+			case kAdPurposeImpressionPlayerLarge:		url = "page_pos_impression_player_large";		break;
+			case kAdPurposeImpressionPlayerSmall:		url = "page_pos_impression_player_small";		break;
+			case kAdPurposeImpressionSplash:			url = "page_pos_impression_splash";				break;
+			case kAdPurposeImpressionStream:			url = "page_pos_impression_stream";				break;
+			case kAdPurposeRequestBanner:				url = "page_pos_request_banner";				break;
+			case kAdPurposeRequestPlayer:				url = "page_pos_request_player";				break;
+			case kAdPurposeRequestSplash:				url = "page_pos_request_splash";				break;
+			case kAdPurposeRequestStream:				url = "page_pos_request_stream";				break;
+
+			default:									return null;
+		}
+
+		url = config.adsPositionForPurpose( url );
+		url = IHRUtilities.stringByReplacingString( template, "{$PAGEPOS}", url, true );
+		url += "&" + config.parameters( true );
+		
+		if ( ( station = IHRPlayerClient.shared().getStation() ) != null ) {
+			if ( ( adParams = station.get( IHRStation.kAdsDartParams ) ) != null ) {
+				url += adParams;
+			}
+		}
+
+		return url;
+	}
+
+	// protected classes
+
+	protected class Report implements Runnable {
+		Thread				mThread;
+		IHRVector			mURLs = new IHRVector();
+
+		public synchronized void report( int purpose ) {
+			mURLs.addElement( adURLForPurpose( purpose ) );
+
+			if ( mThread == null ) {
+				( mThread = new Thread( this , "IHRReport" ) ).start();
+			}
+		}
+
+		public void run() {
+			String			url;
+
+			for ( ;; ) {
+				synchronized( this ) {
+					if ( mURLs.size() == 0 ) {
+						mThread = null;
+						break;
+					}
+
+					url = (String) mURLs.elementAt( 0 );
+					mURLs.removeElementAt( 0 );
+				}
+
+				try {
+					IHRHTTP.reportSynchronous( url );
+				} catch ( Exception e ) {
+					synchronized( this ) {
+						mURLs.insertElementAt( url, 0 );
+					}
+				}
+			}
+		}
+	}
+
+	protected class Request implements Runnable {
+		int								mType;
+		
+		public Request( int type ) {
+			mType = type;
+			new Thread( this , "IHRAd Request " + mType ).start();
+		}
+		
+		public void run() {
+			Bitmap				bitmap;
+			byte[]				data;
+			IHRHashtable		hash;
+			String				params, url;
+			int					purpose;
+
+			try {
+				switch ( mType ) {
+					case kAdTypeBanner: {
+						params = "&bannerHeight=" + mBannerHeight;
+						params += "&bannerWidth=" + mBannerWidth;
+
+						purpose = kAdPurposeRequestBanner;
+					} break;
+
+					case kAdTypePlayer: {
+						params = "&largeHeight=" + mPlayerLargeHeight;
+						params += "&largeWidth=" + mPlayerLargeWidth;
+						params += "&smallHeight=" + mPlayerSmallHeight;
+						params += "&smallWidth=" + mPlayerSmallWidth;
+
+						purpose = kAdPurposeRequestPlayer;
+					} break;
+
+					default:				return;
+				}
+
+				if ( ( url = adURLForPurpose( purpose ) ) == null ) return;
+
+				url += params;
+				
+				Log.d( "IHRAd", "DART REQUEST: " + url );
+				
+				data = IHRHTTP.fetchSynchronous( url );
+				
+				if ( null != data && 1 == data.length ) {
+					mNoAds[mType] = System.currentTimeMillis();
+				}
+				
+				hash = new IHRXMLHashtable( data ).mHashtable;
+
+				switch ( mType ) {
+					case kAdTypeBanner: {
+						if ( ( url = (String) hash.get( "banner_ad" ) ) == null ) break;
+						
+						data = IHRHTTP.fetchSynchronous( url );
+						bitmap = BitmapFactory.decodeByteArray( data, 0, data.length );
+						hash.put( "banner_image", bitmap );
+						hash.remove( "banner_ad" );
+
+						mAdBanner = hash;
+
+						if ( mHandlerBanner != null ) {
+							mHandlerBanner.sendMessage( mHandlerBanner.obtainMessage( kMessageAdAcquired, mType, 0, IHRAd.this ) );
+						}
+					} break;
+
+					case kAdTypePlayer: {
+						if ( ( url = (String) hash.get( "large_ad" ) ) == null ) break;
+						if ( hash.get( "small_ad" ) == null ) break;
+
+						data = IHRHTTP.fetchSynchronous( url );
+						bitmap = BitmapFactory.decodeByteArray( data, 0, data.length );
+						hash.put( "large_image", bitmap );
+						hash.remove( "large_ad" );
+//						Log.d( "@@ ad" , IHRUtilities.description( hash ) );
+						data = IHRHTTP.fetchSynchronous( (String) hash.get( "small_ad" ) );
+						bitmap = BitmapFactory.decodeByteArray( data, 0, data.length );
+						hash.put( "small_image", bitmap );
+						hash.remove( "small_ad" );
+
+						mAdPlayer = hash;
+
+						if ( mHandlerPlayer != null ) {
+							mHandlerPlayer.sendMessage( mHandlerPlayer.obtainMessage( kMessageAdAcquired, mType, 0, IHRAd.this ) );
+						}
+					} break;
+				}
+			} catch ( Exception e ) {
+
+			}
+
+			synchronized( IHRAd.this ) {
+				mRequestsInProgress &= ~mType;
+			}
+		}
+	}
+}

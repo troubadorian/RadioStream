@@ -1,0 +1,97 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<RelativeLayout xmlns:android='http://schemas.android.com/apk/res/android'
+	android:background='#00000000'
+	android:layout_width='fill_parent'
+	android:layout_height='fill_parent'>
+	
+	<TextView
+		android:id='@+id/RegisterUsernameLabel'
+		android:layout_height='wrap_content'
+		android:layout_width='80px'
+		android:layout_marginTop='15px'
+		
+		android:text='Username / Email:'
+		android:gravity='right'
+		android:lines='2'
+		android:textColor='#ffffffff'
+		android:textSize='14px'
+		android:typeface='sans'
+	/>
+	
+	<EditText
+		android:id='@+id/RegisterUsername'
+		android:layout_height='wrap_content'
+		android:layout_width='fill_parent'
+		android:layout_alignBaseline='@id/RegisterUsernameLabel'
+		android:layout_toRightOf='@id/RegisterUsernameLabel'
+		android:layout_margin='10px'
+		
+		android:text=''
+		android:hint='name or me@my.com'
+		android:gravity='left'
+		android:ellipsize='end'
+		android:maxLines='1'
+		android:textColor='#FF000000'
+		android:textSize='14px'
+		android:typeface='sans'
+	/>
+	
+	<TextView
+		android:id='@+id/RegisterPasswordLabel'
+		android:layout_height='wrap_content'
+		android:layout_width='80px'
+		android:layout_marginTop='0px'
+		android:layout_below='@id/RegisterUsername'
+		
+		android:text='Password:'
+		android:gravity='right'
+		android:textColor='#ffffffff'
+		android:textSize='14px'
+		android:typeface='sans'
+	/>
+	
+	<Button
+		android:id='@+id/RegisterSubmit'
+		android:layout_height='wrap_content'
+		android:layout_width='80px'
+		android:layout_below='@id/RegisterUsername'
+		android:layout_alignParentRight='true'
+		android:layout_marginTop='-8px'
+		android:layout_marginRight='8px'
+		
+		android:text='Send'
+	/>
+	
+	<EditText
+		android:id='@+id/RegisterPassword'
+		android:layout_height='wrap_content'
+		android:layout_width='fill_parent'
+		android:layout_alignBaseline='@id/RegisterPasswordLabel'
+		android:layout_toRightOf='@id/RegisterPasswordLabel'
+		android:layout_toLeftOf='@id/RegisterSubmit'
+		android:layout_margin='10px'
+		
+		android:password="true"
+		android:inputType="textPassword"
+		android:text=''
+		android:hint='Password'
+		android:gravity='left'
+		android:ellipsize='end'
+		android:maxLines='1'
+		android:textColor='#FF000000'
+		android:textSize='14px'
+		android:typeface='sans'
+	/>
+	
+	<ProgressBar
+		android:id='@+id/RegisterProgress'
+		android:layout_height='wrap_content'
+		android:layout_width='wrap_content'
+		android:layout_centerHorizontal='true'
+		android:layout_below='@id/RegisterPassword'
+		android:layout_marginTop='60px'
+		
+		android:indeterminateOnly='true'
+		android:visibility='gone'
+	/>
+</RelativeLayout>

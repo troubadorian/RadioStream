@@ -1,0 +1,511 @@
+package com.troubadorian.streamradio.model;
+
+import java.util.Collection;
+import java.util.List;
+
+import com.troubadorian.streamradio.client.model.IHRHashtable;
+import com.troubadorian.streamradio.client.model.IHRPreferences;
+import com.troubadorian.streamradio.client.model.IHRVector;
+import com.troubadorian.streamradio.client.services.IHRService;
+
+public class IHRPremiumChannels implements IHRListener {
+	public static final long	kPreferenceKeyPremiumVersion = 0x4948525056657273L;	//	IHRPVers
+	public static final String	kMessagePremium = "com.clearchannel.iheartradio.premium";
+	
+	public static final String	kNotifyNamePremium = "premium";
+	public static final String	kNotifyPrefixPremium = "premium_";
+	
+	private IHRVector			_channels;
+	private IHRHashtable		_archives;
+	private String				_version;
+	
+	public IHRPremiumChannels() {
+		//**
+		IHRService.g.mBroadcaster.listenFor( IHRCache.kNotifyNameDownload , this );
+		/*/
+		IHRBroadcaster.common().listenFor( IHRCache.kNotifyNameDownload , this );
+		/**/
+	}
+	
+	public int mergeLists( List inNew , List inOld ) {
+		int						result = 0;
+		int						index , count;
+		
+		IHRCache				cache = IHRCache.shared();
+		IHRPremiumCredentials	credentials = IHRPremiumCredentials.shared();
+		IHRHashtable			reverse = new IHRHashtable();
+		IHRPremiumChannel		channel , now , old;
+		String					site;
+		String					url;
+		
+		count = ( null == inNew ) ? 0 : inNew.size();
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			now = (IHRPremiumChannel)inNew.get( index );
+			site = now.getSite();
+			reverse.put( site , now );
+			
+			String				username = now.trialUsername();
+			String				password = now.trialPassword();
+			
+			if ( username.length() > 0 && password.length() > 0 && !now.isExpired() ) {
+				//	ignored if user already entered credentials
+				credentials.propose( site , username , password , now.trialExpiring() );
+			}
+		}
+		
+		count = ( null == inOld ) ? 0 : inOld.size();
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			old = (IHRPremiumChannel)inOld.get( index );
+			site = old.getSite();
+			channel = (IHRPremiumChannel)reverse.get( site );
+			
+			url = old.getLogoURL();
+			if ( null == channel || !url.equals( channel.getLogoURL() ) ) {
+				cache.delete( url );
+			}
+			
+			url = old.getPodcastURL();
+			if ( null == channel || !url.equals( channel.getPodcastURL() ) ) {
+				IHRVector		rss = ( null == _archives ) ? null : (IHRVector)_archives.get( site );
+				
+				result += 1;
+				
+				if ( null != rss ) {
+					mergeRSS( null , rss );
+					_archives.remove( site );
+				}
+				
+				cache.delete( url );
+			}
+			
+			if ( null == channel ) {
+				//	forget credentials for channel
+				IHRPremiumCredentials.shared().propose( site , null , null , null );
+			} else {
+				String			old_username = old.trialUsername();
+				String			old_password = old.trialPassword();
+				String			new_username = channel.trialUsername();
+				String			new_password = channel.trialPassword();
+				
+				if ( old_username.length() > 0 && old_password.length() > 0 ) {
+					if ( !old_username.equals( new_username ) || !old_password.equals( new_password ) ) {
+						if ( credentials.isUsing( site , old_username , old_password ) && !channel.isExpired() ) {
+							credentials.propose( site , new_username , new_password , channel.trialExpiring() );
+						}
+					}
+				}
+			}
+		}
+		
+		return result;	//	number of removed or changed podcasts
+	}
+	
+	public static int mergeRSS( List inNew , List inOld ) {
+		int						result = 0;
+		
+		if ( null != inOld ) {
+			IHRHashtable		has = new IHRHashtable();
+			IHRHashtable		had = new IHRHashtable();
+			IHRPremiumItem		item;
+			int					index , count;
+			
+			count = ( null == inNew ) ? 0 : inNew.size();
+			for ( index = 0 ; index < count ; ++index ) {
+				item = (IHRPremiumItem)inNew.get( index );
+				has.put( item.getGUID() , item.getLink() );
+			}
+			
+			count = inOld.size();
+			for ( index = 0 ; index < count ; ++index ) {
+				item = (IHRPremiumItem)inOld.get( index );
+				had.put( item.getGUID() , item.getLink() );
+				
+				if ( null == has.get( item.getGUID() ) ) {
+					IHRCache.shared().delete( item.getLink() );
+					
+					result += 1;
+				}
+			}
+			
+			count = ( null == inNew ) ? 0 : inNew.size();
+			for ( index = 0 ; index < count ; ++index ) {
+				item = (IHRPremiumItem)inNew.get( index );
+				if ( null == had.get( item.getGUID() ) ) {
+					result += 1;
+				}
+			}
+		}
+		
+		return result;	//	number of archive items different between lists
+	}
+	
+	public void parseChannelsXML( byte[] inXML ) {
+		IHRVector				channels = ( null == inXML ) ? null : (IHRVector)IHRPremiumChannel.parseXML( inXML );
+		IHRVector				previous = _channels;
+		
+		mergeLists( channels , previous );
+		
+		_channels = channels;
+		
+		if ( null != _version ) {
+			//**
+			IHRService.g.preferencesPut( "PremiumVersion" , _version );
+			/*/
+			IHRPreferences.set( kPreferenceKeyPremiumVersion , _version );
+			/**/
+			
+			_version = null;
+		}
+		
+		//**
+		IHRService.g.mConfiguration.notifyClient( kNotifyNamePremium , new IHRHashtable() );
+		/*/
+		IHRBroadcaster.common().notifyFor( kNotifyNamePremium , null );
+		/**/
+	}
+	
+	public void parseArchivesXML( String inSite , byte[] inXML ) {
+		IHRVector				archives = (IHRVector)IHRPremiumItem.parseXML( inXML );
+		IHRVector				previous = ( null == _archives ) ? null : (IHRVector)_archives.get( inSite );
+		int						changes = mergeRSS( archives , previous );
+		
+		if ( null == archives ) {
+			if ( null != _archives ) _archives.remove( inSite );
+		} else {
+			if ( null == _archives ) _archives = new IHRHashtable();
+			
+			_archives.put( inSite , archives );
+		}
+		
+		if ( null == archives || null == previous || changes > 0 ) {
+			//**
+			if ( null != IHRService.g ) {
+				IHRService.g.mConfiguration.notifyClient( kNotifyPrefixPremium + inSite , new IHRHashtable() );
+			}
+			/*/
+			IHRBroadcaster.common().notifyFor( kNotifyPrefixPremium + inSite , null );
+			/**/
+		}
+	}
+	
+	public void fetch( String inVersion , boolean inAllowNetwork ) {
+		IHRPremiumCredentials	credentials = IHRPremiumCredentials.shared();
+		IHRCache				cache = IHRCache.shared();
+		IHRVector				channels = _channels;
+		IHRPremiumChannel		channel;
+		String					identifier;
+		String					site;
+		String					url;
+		byte[]					xml;
+		
+		int						index , count;
+		
+		if ( null == channels ) {
+			identifier = "premium";
+			url = IHRXML.kURLBase + IHRXML.sConfigFilesDirectory + identifier + ".php";
+			xml = cache.dataForURL( url );
+			
+			if ( null != xml ) parseChannelsXML( xml );
+			
+			if ( inAllowNetwork && null == _version && null != inVersion ) {
+				String			version = IHRPreferences.getString( kPreferenceKeyPremiumVersion );
+				
+				if ( null == version || !version.equals( inVersion ) ) {
+					_version = inVersion;
+					
+					cache.cacheFileWithURL( url , IHRCache.kOptionSingle , identifier , null );
+				}
+			}
+			
+			channels = _channels;
+		}
+		
+		count = ( null == channels ) ? 0 : channels.size();
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			channel = (IHRPremiumChannel)channels.get( index );
+			site = channel.getSite();
+			url = channel.getPodcastURL();
+			
+			if ( null != url && 0 != url.length() ) {
+				identifier = kNotifyPrefixPremium + site;
+				
+				if ( null == _archives || null == _archives.get( site ) ) {
+					xml = cache.dataForURL( url );
+					
+					if ( null != xml ) parseArchivesXML( site , xml );
+				}
+				
+				if ( inAllowNetwork && credentials.hasAuthenticated( site ) ) {
+					cache.updateForURL( url , 0 , identifier , site );
+				}
+			}
+		}
+	}
+	
+	public void refresh( String inSite , long inMaximumInterval ) {
+		IHRPremiumCredentials	credentials = IHRPremiumCredentials.shared();
+		IHRCache				cache = IHRCache.shared();
+		IHRVector				channels = _channels;
+		IHRPremiumChannel		channel;
+		String					identifier;
+		String					site;
+		String					url;
+		
+		int						index , count;
+		
+		count = ( null == channels ) ? 0 : channels.size();
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			channel = (IHRPremiumChannel)channels.get( index );
+			site = channel.getSite();
+			url = channel.getPodcastURL();
+			
+			if ( null == site || null == url || 0 == url.length() ) continue;
+			if ( null == inSite && !credentials.hasAuthenticated( site ) ) continue;
+			if ( null != inSite && !site.equals( inSite ) ) continue;
+			
+			identifier = kNotifyPrefixPremium + site;
+			cache.updateForURL( url , inMaximumInterval , identifier , site );
+		}
+	}
+	
+	public void listen( String inName , IHRHashtable inDetails ) {
+		if ( null == inName || null == inDetails || null != inDetails.get( "error" ) ) {
+		} else if ( inName.equals( "IHRCacheResults" ) ) {
+			String				identifier = (String)inDetails.get( "identifier" );
+			String				url = (String)inDetails.get( "url" );
+			byte[]				data;
+			
+			//	could parse results on background thread
+			if ( null == identifier ) {
+			} else if ( identifier.equals( kNotifyNamePremium ) ) {
+				data = IHRCache.shared().dataForURL( url );
+				
+				if ( null != data ) parseChannelsXML( data );
+			} else if ( identifier.startsWith( kNotifyPrefixPremium ) && identifier.length() > 8 ) {
+				data = IHRCache.shared().dataForURL( url );
+				
+				if ( null != data ) parseArchivesXML( identifier.substring( 8 ) , data );
+			}
+		}
+	}
+	
+	public IHRVector channels() {
+		return _channels;
+	}
+	
+	public IHRVector channelsForOffline() {
+		IHRVector				result = new IHRVector();
+		IHRVector				source = channels();
+		int						index , count = ( null == source ) ? 0 : source.size();
+		IHRPremiumCredentials	credentials = IHRPremiumCredentials.shared();
+		
+		for ( index = 0 ; index < count ; ++index  ) {
+			IHRPremiumChannel	channel = (IHRPremiumChannel)source.get( index );
+			String				site = channel.getSite();
+			
+			if ( credentials.hasAuthenticated( site ) && hasArchives( site , true ) ) {
+				result.add( channel );
+			}
+		}
+		
+		return result;
+	}
+	
+	public IHRVector channels( boolean inForOffline ) {
+		return inForOffline ? channelsForOffline() : channels();
+	}
+	
+	public IHRPremiumChannel searchForChannel( String inValue , int inIndex ) {
+		IHRPremiumChannel		result = null;
+		IHRPremiumChannel		channel;
+		IHRVector				channels = _channels;
+		String					value;
+		
+		int						index , count = ( null == channels ) ? 0 : channels.size();
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			channel = (IHRPremiumChannel)channels.get( index );
+			value = channel.get( inIndex );
+			
+			if ( null != value && null != inValue && inValue.equals( value ) ) {
+				result = channel;
+				break;
+			}
+		}
+		
+		return result;
+	}
+	
+	public IHRPremiumChannel channel( String inSite ) {
+		return searchForChannel( inSite , IHRPremiumChannel.kSite );
+	}
+	
+	public IHRPremiumChannel channelWithName( String inName ) {
+		return searchForChannel( inName , IHRPremiumChannel.kName );
+	}
+	
+	public IHRVector premiumItems( String inSite ) {
+		return ( null == _archives ) ? null : (IHRVector)_archives.get( inSite );
+	}
+	
+	public IHRVector premiumItemsForOffline( String inSite ) {
+		IHRVector				result = new IHRVector();
+		IHRVector				source = premiumItems( inSite );
+		IHRCache				cache = IHRCache.shared();
+		int						index , count = ( null == source ) ? 0 : source.size();
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			IHRPremiumItem		item = (IHRPremiumItem)source.get( index );
+			String				url = item.getLink();
+			
+			if ( null != url && IHRCache.kStateOnDisk == cache.stateForFileWithURL( url ) ) {
+				result.add( item );
+			}
+		}
+		
+		return result;
+	}
+	
+	public IHRVector premiumItems( String inSite , boolean inForOffline ) {
+		return inForOffline ? premiumItemsForOffline( inSite ) : premiumItems( inSite );
+	}
+	
+	public boolean hasArchives( String inSite , boolean inOnlyCompleted ) {
+		boolean					result = false;
+		IHRVector				items = premiumItems( inSite );
+		IHRCache				cache = IHRCache.shared();
+		IHRPremiumItem			item;
+		String					url;
+		int						index , count = ( null == items ) ? 0 : items.size();
+		int						state;
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			item = (IHRPremiumItem)items.get( index );
+			url = item.getLink();
+			
+			if ( null != url && 0 != url.length() ) {
+				state = cache.stateForFileWithURL( url );
+				
+				if ( inOnlyCompleted ? ( IHRCache.kStateOnDisk == state ) : ( IHRCache.kStateAbsent != state ) ) {
+					result = true;
+					break;
+				}
+			}
+		}
+		
+		return result;
+	}
+	
+	public boolean hasArchives( boolean inOnlyCompleted ) {
+		boolean					result = false;
+		
+		IHRPremiumChannel		channel;
+		IHRVector				channels = _channels;
+		String					site;
+		
+		int						index , count = ( null == channels ) ? 0 : channels.size();
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			channel = (IHRPremiumChannel)channels.get( index );
+			site = channel.getSite();
+			
+			if ( null != site && hasArchives( site , inOnlyCompleted ) ) {
+				result = true;
+				break;
+			}
+		}
+		
+		return result;
+	}
+	
+	public boolean hasArchive( IHRPremiumItem inItem ) {
+		String					url = archiveURL( inItem );
+		
+		return ( null != url && 0 != url.length() && IHRCache.kStateAbsent != IHRCache.shared().stateForFileWithURL( url ) );
+	}
+	
+	public String archiveURL( IHRPremiumItem inItem ) {
+		return ( null == inItem ) ? null : inItem.getLink();
+	}
+	
+	public IHRHashtable archiveProgress( IHRPremiumItem inItem ) {
+		String					url = archiveURL( inItem );
+		
+		return ( null == url || 0 == url.length() ) ? null : IHRCache.shared().progressForURL( url );
+	}
+	
+	public int archiveDownload( IHRPremiumItem inItem , boolean inPauseAlreadyDownloading , String inSite ) {
+		int						result;
+		
+		IHRCache				cache = IHRCache.shared();
+		String					url = archiveURL( inItem );
+		
+		result = cache.stateForFileWithURL( url );
+		
+		switch ( result ) {
+			case IHRCache.kStateAbsent: cache.cacheAudioWithURL( url , IHRCache.kOptionResume , "archive" , inSite ); break;
+			case IHRCache.kStatePaused: cache.unpause( url ); break;
+			case IHRCache.kStateQueued: if ( inPauseAlreadyDownloading ) cache.pause( url ); break;
+		}
+		
+		return result;
+	}
+	
+	public void archiveUnmapFromCache( IHRPremiumItem inItem , IHRCache inCache ) {
+		String					url = archiveURL( inItem );
+		
+		if ( null != url && 0 != url.length() ) inCache.delete( url );
+	}
+	
+	public void archiveRemove( IHRPremiumItem inItem ) {
+		archiveUnmapFromCache( inItem , IHRCache.shared() );
+	}
+	
+	//**
+	public void archiveRemoveGroup( Collection inItems ) {
+		IHRCache				cache = IHRCache.shared();
+		
+		for ( Object item : inItems ) {
+			archiveUnmapFromCache( (IHRPremiumItem)item , cache );
+		}
+	}
+	
+	public void archiveRemoveGroup( IHRHashtable inItems ) {
+		archiveRemoveGroup( inItems.values() );
+	}
+	
+	public void archiveRemoveSite( String inSite ) {
+		IHRVector				items = premiumItems( inSite );
+		
+		if ( null != items ) archiveRemoveGroup( items );
+	}
+	/*/
+	public void archiveRemoveGroup( Enumeration inItems ) {
+		IHRCache				cache = IHRCache.shared();
+		
+		while ( inItems.hasMoreElements() ) {
+			IHRPremiumItem		item = (IHRPremiumItem)inItems.nextElement();
+			
+			archiveUnmapFromCache( item , cache );
+		}
+	}
+	
+	public void archiveRemoveGroup( IHRHashtable inItems ) {
+		archiveRemoveGroup( inItems.elements() );
+	}
+	
+	public void archiveRemoveSite( String inSite ) {
+		IHRVector				items = premiumItems( inSite );
+		
+		if ( null != items ) archiveRemoveGroup( items.elements() );
+	}
+	/**/
+	
+	public void onCreate( Object inOwner ) {}
+	public void onDestroy( Object inOwner ) {}
+	
+}

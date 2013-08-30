@@ -1,0 +1,572 @@
+package com.clearchannel.iheartradio.android.services;
+
+import java.io.UnsupportedEncodingException;
+import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.Calendar;
+import java.util.Collection;
+import java.util.List;
+
+import android.app.Notification;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.app.Service;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.net.wifi.WifiManager;
+import android.net.wifi.WifiManager.WifiLock;
+import android.os.Binder;
+import android.os.IBinder;
+import android.os.Message;
+import android.os.Parcel;
+import android.os.Handler.Callback;
+import android.util.Log;
+
+import com.clearchannel.iheartradio.android.model.IHRThreadable;
+import com.clearchannel.iheartradio.controller.R;
+import com.clearchannel.iheartradio.controller.TriggerActivity;
+import com.clearchannel.iheartradio.model.IHRBroadcaster;
+import com.clearchannel.iheartradio.model.IHRCache;
+import com.clearchannel.iheartradio.model.IHRPremiumCredentials;
+import com.google.android.apps.analytics.GoogleAnalyticsTracker;
+
+public class IHRService extends Service implements Callback {
+	public static IHRService	g;
+	
+	public final static String	kSeparator = "\t";
+	
+	public final static String	kMessageStop = "com.clearchannel.iheartradio.service.stop";
+	public final static int		kNotificationID = 236;
+	
+	//	Binder.FIRST_CALL_TRANSACTION
+	public final static int		kQuit = 1;
+	public final static int		kHalt = 2;
+	public final static int		kRunInForeground = 3;
+	public final static int		kRunInBackground = 4;
+	
+	public final static int		kRestoreCache = 6;
+	public final static int		kFetchStrings = 7;
+	public final static int		kWriteStrings = 8;
+	
+	public final static int		kPlayer = 10;
+	public final static int		kConfiguration = 100;
+	public final static int		kPerformOnThread = 1000;
+	//	Binder.LAST_CALL_TRANSACTION
+	
+	private BroadcastReceiver	mReceiver;
+	private BroadcastReceiver	mNetworkReceiver;
+	private Notification		mNotification;
+	private Editor				mEditor;
+	private WifiLock			mWifi;
+	
+	public IHRThreadable		mThreadable;
+	public IHRBroadcaster		mBroadcaster;
+	public IHRServicePlayer		mPlayer;
+	public IHRServiceConfiguration	mConfiguration;
+	public IHRPremiumCredentials	mCredentials;
+	public IHRCache				mCache;
+	
+	GoogleAnalyticsTracker    mTracker;
+	
+	public void debug( String inMessage ) {
+		Log.d( "IHRService" , inMessage );
+	}
+	
+	//	called on main thread
+	public boolean handleTransactions( int code , Parcel data , Parcel reply , int flags ) {
+		boolean					result = true;
+		if ( code > kPerformOnThread ) {
+//			debug( "handleTransaction " + code );
+			mThreadable.handle( code , 0 , flags , data );
+		} else if ( code > kConfiguration ) {
+			result = mConfiguration.handleTransactions( code , data , reply , flags );
+		} else if ( code > kPlayer ) {
+			result = mPlayer.handleTransactions( code , data , reply , flags );
+		} else switch ( code ) {
+		case kQuit: stopSelf(); break;
+		case kHalt: mThreadable.reset(); break;
+		case kRunInForeground: assignMode( ( data.readInt() > 0 ) ? 2 : 1 ); break;
+		case kRunInBackground: assignMode( 0 ); break;
+		
+		case kRestoreCache: mCache.restoreDownloadsAfterLaunch(); break;
+		case kFetchStrings: reply.writeStringArray( this.preferencesCopyStrings( data.readString() ) ); break;
+		case kWriteStrings: preferencesWrite( data.readString() , data.createStringArray() ); break;
+		
+		default: result = false;
+		}
+		
+		return result;
+	}
+	
+	public boolean handleMessage( Message inMessage ) {
+		boolean					result = true;
+		
+		if ( inMessage.what > kPerformOnThread + kConfiguration ) {
+			result = ( null == mConfiguration ) ? false : mConfiguration.handleMessage( inMessage );
+		} else if ( inMessage.what > kPerformOnThread + kPlayer ) {
+			result = ( null == mPlayer ) ? false : mPlayer.handleMessage( inMessage );
+		} else switch ( inMessage.what ) {
+			default: result = false;
+		}
+		
+		return result;
+	}
+	
+	public boolean hasConnectivity() {
+		ConnectivityManager		connectivity = (ConnectivityManager)getSystemService( Context.CONNECTIVITY_SERVICE );
+		NetworkInfo				network = connectivity.getActiveNetworkInfo();
+		
+		if (null != network && network.isConnected())
+		{
+			if ( network.getTypeName().equalsIgnoreCase("wifi"))
+			{
+				updateNetworkStatus("wifi");
+			} else if (network.getTypeName().equalsIgnoreCase("mobile")) {
+				updateNetworkStatus("data");
+			}
+			return true;
+		}
+		
+		//return null != network && network.isConnected();
+		return false;
+	}
+	
+	public Method locateMethod( String inName ) {
+		Method					result = null;
+		Method					method;
+		Method[]				methods = this.getClass().getMethods();
+		int						index , count = ( null == methods ) ? 0 : methods.length;
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			method = methods[index];
+			
+			if ( inName.equals( method.getName() ) ) {
+				result = method;
+				break;
+			}
+		}
+		
+		return result;
+	}
+	
+	public Notification createNotification() {
+		if ( null == mNotification ) {
+			mNotification = new Notification();
+			mNotification.audioStreamType = Notification.STREAM_DEFAULT;
+			//mNotification.contentIntent = PendingIntent.getActivity( this , 0 , new Intent( this , iheartradio.class ).addFlags( Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_FROM_BACKGROUND )  , PendingIntent.FLAG_UPDATE_CURRENT );
+			mNotification.contentIntent = PendingIntent.getActivity( this , 0 , new Intent( this , TriggerActivity.class ).addFlags( Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_FROM_BACKGROUND )  , PendingIntent.FLAG_UPDATE_CURRENT );
+//			mNotification.contentView = new RemoteViews( "com.clearchannel.iheartradio.controller" , R.layout.notification );
+			mNotification.defaults = 0;
+			mNotification.deleteIntent = PendingIntent.getBroadcast( this , 0 , new Intent( kMessageStop ) , PendingIntent.FLAG_UPDATE_CURRENT );
+			mNotification.flags = Notification.FLAG_NO_CLEAR | Notification.FLAG_ONGOING_EVENT | 64/*Notification.FLAG_FOREGROUND_SERVICE*/;
+			mNotification.icon = R.drawable.icon_staus_bar;
+			mNotification.iconLevel = 0;
+			mNotification.number = 0;
+			mNotification.sound = null;
+			mNotification.tickerText = "iheartradio";	//	metadata
+			mNotification.vibrate = null;
+			mNotification.when = System.currentTimeMillis();
+			mNotification.setLatestEventInfo( this , "iheartradio" , "" , mNotification.contentIntent );
+		}
+		
+		return mNotification;
+	}
+	
+	public void updateNotification( String inCaption , String inContent ) {
+		if ( null != mNotification ) {
+			mNotification.tickerText = inCaption;
+			mNotification.setLatestEventInfo( this , inCaption , inContent , mNotification.contentIntent );
+			mNotification.when = System.currentTimeMillis();
+			
+			((NotificationManager)getSystemService( Context.NOTIFICATION_SERVICE )).notify( kNotificationID , mNotification );
+		}
+	}
+	
+	public void noticeStreaming( boolean inStreaming ) {
+		if ( inStreaming ) {
+			if ( null == mWifi ) {
+				try {
+					mWifi = ((WifiManager)this.getSystemService( WIFI_SERVICE )).createWifiLock( WifiManager.WIFI_MODE_FULL , "iheartradio" );
+				} catch ( Exception e ) {}
+			}
+			if ( null != mWifi && !mWifi.isHeld() ) {
+				mWifi.acquire();
+			}
+		} else {
+			if ( null != mWifi && mWifi.isHeld() ) {
+//				mWifi.release();	-- only release onDestroy
+			}
+		}
+	}
+	
+	/*
+	 *  2 - run with notifications
+	 *  1 - run with notifications or quit
+	 *  0 - run with foreground interface
+	 * -1 - quit
+	 * 
+	 * setForeground is API level 3 call removed in API level 5
+	 * startForeground and stopForeground are API level 5 only
+	 * */
+	public void assignMode( int inMode ) {
+		Method					method = null;
+		
+		if ( 1 == inMode ) {
+			if ( !mPlayer.wantsForeground() ) {
+				inMode = -1;
+			}
+		}
+		
+		if ( inMode > 0 ) {
+			Notification		notification = createNotification();
+			
+			mPlayer.updateNotification( mPlayer.mMetadata );
+			
+			try {
+//				startForeground( kNotificationID , notification() );
+				method = this.getClass().getMethod( "startForeground" , new Class[] { int.class , Notification.class } );
+//				method = locateMethod( "startForeground" );
+				if ( null != method ) method.invoke( this , kNotificationID , notification );
+			} catch ( Exception e ) {}
+			
+			if ( null == method ) {
+				setForeground( true );
+			}
+		} else if ( null != mNotification ) {
+			((NotificationManager)getSystemService( Context.NOTIFICATION_SERVICE )).cancel( kNotificationID );
+			
+			try {
+//				stopForeground( true );
+				method = this.getClass().getMethod( "stopForeground" , new Class[] { boolean.class } );
+//				method = locateMethod( "stopForeground" );
+				if ( null != method ) method.invoke( this , true );
+			} catch ( Exception e ) {}
+			
+			if ( null == method ) {
+				setForeground( false );
+			}
+			
+			mNotification = null;
+		}
+		
+		if ( inMode < 0 ) {
+			stopSelf();
+		}
+	}
+	
+	/**
+	protected void interrogateSystem() {
+		try {
+			File[]					files = File.listRoots();
+			int						index , count = ( null == files ) ? 0 : files.length;
+			
+			for ( index = 0 ; index < count ; ++index ) {
+				String				path = files[index].getAbsolutePath();
+				File[]				items = files[index].listFiles();
+				int					i , c = ( null == items ) ? 0 : items.length;
+				
+				Log.d( "service" , "File.listRoots[" + index + "] '" + files[index] + "' " + path.length() + " " + (int)path.charAt( 0 ) + " " + (int)path.charAt( 1 ) + " " + (int)path.charAt( 2 ) );
+				
+				for ( i = 0 ; i < c ; ++i ) {
+					Log.d( "service" , "File.listRoots[" + index + "] '" + items[i] + "' " + ( items[i].isDirectory() ? "d" : items[i].length() ) );
+				}
+			}
+		} catch ( Exception e ) {}
+		
+		try {
+			Log.d( "service" , "File.createTempFile( \"IHR\" , \"tmp\" ) " + File.createTempFile( "IHR" , "tmp" ).getAbsolutePath() );
+			Log.d( "service" , "getPackageCodePath() " + this.getPackageCodePath() );
+			Log.d( "service" , "getPackageResourcePath() " + this.getPackageResourcePath() );
+			Log.d( "service" , "getFileStreamPath( \"IHR\" ) " + this.getFileStreamPath( "IHR" ) );
+			Log.d( "service" , "getDatabasePath( \"IHR\" ) " + this.getDatabasePath( "IHR" ) );
+			Log.d( "service" , "getDir( \"IHR\" ) " + this.getDir( "IHR" , MODE_PRIVATE ).getAbsolutePath() );
+			Log.d( "service" , "getCacheDir() " + this.getCacheDir().getAbsolutePath() );
+			Log.d( "service" , "getFilesDir() " + this.getFilesDir().getAbsolutePath() );
+		} catch ( Exception e ) {}
+		
+		try {
+			Map<String , String>	map = System.getenv();
+			
+			for ( String key : map.keySet() ) {
+				Log.d( "service" , "System.getenv[" + key + "] " + map.get( key ) );
+			}
+		} catch ( Exception e ) {}
+		
+		try {
+			Properties				properties = System.getProperties();
+			
+			for ( Object property : properties.keySet() ) {
+				Log.d( "service" , "System.getProperties[" + property + "] " + properties.getProperty( (String)property ) );
+			}
+		} catch ( Exception e ) {}
+	}
+	/**/
+	
+	protected void doCreate() {
+		g = this;
+		
+		mThreadable = new IHRThreadable( this );
+		mBroadcaster = new IHRBroadcaster( mThreadable );
+		mCache = new IHRCache();
+		
+		/**	TO DO: remove
+		getEditor().clear().commit();	//	clear preferences
+		mCache.deleteFileCache();		//	clear file cache
+		/**/
+		
+//		interrogateSystem();
+		
+		if ( null == mReceiver ) {
+			registerReceiver( mReceiver = new BroadcastReceiver() {
+				@Override
+				public void onReceive( Context c , Intent i ) { stopSelf(); }
+			} , new IntentFilter( kMessageStop ) );
+		}
+		
+		mCredentials = new IHRPremiumCredentials();
+		mCredentials.onCreate( this );
+		
+		mConfiguration = new IHRServiceConfiguration();
+		mConfiguration.onCreate( this );
+		
+		mPlayer = new IHRServicePlayer();
+		mPlayer.onCreate( this );
+		
+		IntentFilter filter = new IntentFilter();
+        //filter.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
+        filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
+        
+		if ( null == mNetworkReceiver ) {
+			registerReceiver( mNetworkReceiver = new BroadcastReceiver() {
+				@Override
+				public void onReceive( Context c , Intent i ) { 
+					String action = i.getAction();
+					String netStatus = "";
+					if (action.equalsIgnoreCase(ConnectivityManager.EXTRA_NO_CONNECTIVITY)) {
+						netStatus = "offline";
+					} else if (action.equalsIgnoreCase(ConnectivityManager.CONNECTIVITY_ACTION)) {
+						NetworkInfo info = (NetworkInfo)i.getParcelableExtra(ConnectivityManager.EXTRA_NETWORK_INFO);
+						if (info.getSubtypeName().equalsIgnoreCase("MOBILE")) {
+							netStatus = "data";
+						} else if (info.getSubtypeName().equalsIgnoreCase("WIFI")) {
+							netStatus = "wifi";
+						}
+					}
+					updateNetworkStatus(netStatus);
+				}
+			} , filter );
+		}
+		
+//		mCache.restoreDownlaodsAfterLaunch();
+	}
+	
+	protected void doDestroy() {
+		mCache.destroy();
+		mThreadable.destroy();
+		
+		mCredentials.onDestroy( this );
+		mCredentials = null;
+		
+		mPlayer.onDestroy( this );
+		mPlayer = null;
+		
+		mConfiguration.onDestroy();
+		mConfiguration = null;
+		
+		if ( null != mReceiver ) {
+			this.unregisterReceiver( mReceiver );
+			mReceiver = null;
+		}
+		
+		if ( null != mNetworkReceiver ) {
+			this.unregisterReceiver( mNetworkReceiver );
+			mNetworkReceiver = null;
+		}
+		
+		if ( null != mWifi ) {
+			mWifi.release();
+			mWifi = null;
+		}
+		
+		if ( null != mNotification ) {
+			assignMode( 0 );
+		}
+		
+		commit();
+		
+		mBroadcaster = null;
+		mThreadable = null;
+		mCache = null;
+		g = null;
+	}
+	
+	@Override
+	public IBinder onBind( Intent intent ) {
+		IBinder					result = null;
+		
+		if ( null == g ) doCreate();
+		
+		if ( null == result ) result = mPlayer.onBind( intent );
+//		if ( null == result ) result = mConfiguration.onBind( intent );
+		
+		if ( null == result ) result = new MyBinder() {
+			@Override
+			public boolean onTransact( int code , Parcel data , Parcel reply , int flags ) {
+				//	called when client calls transact on returned Binder
+				return handleTransactions( code , data , reply , flags );
+			}
+		};
+		
+		return result;
+	}
+	
+	@Override
+	public void onStart( Intent intent , int inID ) {
+		super.onStart( intent , inID );
+		
+		if ( null == g ) doCreate();
+	}
+	
+	//	only called as of API level 5
+	public int onStartCommand( Intent intent , int flags , int inID ) {
+//		super.onStartCommand( intent , flags , inID );
+		
+		if ( null == g ) doCreate();
+		
+		return 1 /*START_STICKY*/;
+	}
+	
+	@Override
+	public void onCreate() {
+		super.onCreate();
+		
+		long					start = System.currentTimeMillis();
+		
+		preferencesValidate();
+		
+		mTracker = GoogleAnalyticsTracker.getInstance();
+		mTracker.start(this.getString(R.string.ga_account), 20, this);
+		
+		debug( "time to validate preferences: " + ( (double)( System.currentTimeMillis() - start ) / 1000 ) );
+		
+		doCreate();
+	}
+	
+	@Override
+	public void onDestroy() {
+		doDestroy();
+		super.onDestroy();
+//		android.os.Process.killProcess( android.os.Process.myPid() );
+	}
+	
+	private void preferencesValidate() {
+		String					key = "valid";
+		boolean					valid = false;
+		
+		try {
+			valid = preferencesGet( key , false );
+		} catch ( Exception e ) {}
+		
+		if ( !valid ) {
+			getEditor().clear();
+			commit();
+			preferencesPut( key , true );
+			Log.d( "services" , "Cleared preferences after failing to validate" );
+		}
+	}
+	
+	protected void updateNetworkStatus(String networkStatus) {
+		if (networkStatus.equals("")) {
+			ConnectivityManager		connectivity = (ConnectivityManager)getSystemService( Context.CONNECTIVITY_SERVICE );
+			NetworkInfo				network = connectivity.getActiveNetworkInfo();
+			if (null != network && network.getTypeName().equalsIgnoreCase("wifi")) {
+				networkStatus = "wifi";
+			} else if (null != network && network.getTypeName().equalsIgnoreCase("mobile")) {
+				networkStatus = "data";
+			}
+		} 
+		
+		if (!this.mConfiguration.mCurrentNetwork.equalsIgnoreCase(networkStatus)) {
+			long now = Calendar.getInstance().getTime().getTime();
+			this.mConfiguration.mCurrentNetwork = networkStatus;
+			if ( 0 == this.mConfiguration.mCurrentNetworkTime )
+			{
+				this.mConfiguration.mCurrentNetworkTime = now;
+			}
+			if (this.mConfiguration.mCurrentNetwork.equals("wifi")) {
+				this.mConfiguration.mWifiDuration += (now - this.mConfiguration.mCurrentNetworkTime);
+			} else if (this.mConfiguration.mCurrentNetwork.equals("data")) {
+				this.mConfiguration.mDataDuration += (now - this.mConfiguration.mCurrentNetworkTime);
+			} else {
+				this.mConfiguration.mOfflineDuration += (now - this.mConfiguration.mCurrentNetworkTime);
+			}
+			this.mConfiguration.mTracker.trackEvent("network", "connection", this.mConfiguration.mCurrentNetwork, Math.round((now - this.mConfiguration.mCurrentNetworkTime)/1000));
+			this.mConfiguration.mCurrentNetworkTime = now;
+			this.mConfiguration.mCurrentNetwork = networkStatus.equals("") ? "offline" : networkStatus;
+		}
+		
+	}
+	
+	public String joinStrings( String[] a ) { int i = 0 , n = a.length; String s = ( n > 0 ) ? a[0] : null; while ( ++i < n ) { s += kSeparator + a[i]; } return s; }
+	public SharedPreferences getPreferences() { return getSharedPreferences( "com.clearchannel.iheratradio.services" , Context.MODE_PRIVATE ); }
+	public Editor getEditor() { if ( null == mEditor ) mEditor = getPreferences().edit(); return mEditor; }
+	public boolean commit() { Editor e = mEditor; mEditor = null; return ( null == e ) ? false : e.commit(); }
+	
+	public Editor preferencesRemove( String inKey ) { return getEditor().remove( inKey ); }
+	public Editor preferencesPut( String inKey ) { return getEditor().remove( inKey ); }
+	public Editor preferencesPut( String inKey , int inValue ) { return getEditor().putInt( inKey , inValue ); }
+//	public Editor preferencesPut( String inKey , long inValue ) { return getEditor().putLong( inKey , inValue ); }
+	public Editor preferencesPut( String inKey , float inValue ) { return getEditor().putFloat( inKey , inValue ); }
+	public Editor preferencesPut( String inKey , boolean inValue ) { return getEditor().putBoolean( inKey , inValue ); }
+	public Editor preferencesPut( String inKey , byte[] inValue ) { return getEditor().putString( inKey , new String( inValue ) ); }
+//	public Editor preferencesPut( String inKey , byte[] inValue , String inEncoding ) throws UnsupportedEncodingException { return getEditor().putString( inKey , new String( inValue , inEncoding ) ); }
+	public Editor preferencesPut( String inKey , String inValue ) { return getEditor().putString( inKey , inValue ); }
+	public Editor preferencesPut( String inKey , String[] inValue ) { return getEditor().putString( inKey , joinStrings( inValue ) ); }
+	public Editor preferencesPut( String inKey , Collection<String> inValue ) { return preferencesPut( inKey , inValue.toArray( new String[inValue.size()] ) ); }
+	
+	public boolean preferencesUnset( String inKey ) { preferencesRemove( inKey ); return commit(); }
+	public boolean preferencesWrite( String inKey ) { preferencesPut( inKey ); return commit(); }
+	public boolean preferencesWrite( String inKey , int inValue ) { preferencesPut( inKey , inValue ); return commit(); }
+//	public boolean preferencesWrite( String inKey , long inValue ) { preferencesPut( inKey , inValue ); return commit(); }
+//	public boolean preferencesWrite( String inKey , float inValue ) { preferencesPut( inKey , inValue ); return commit(); }
+	public boolean preferencesWrite( String inKey , boolean inValue ) { preferencesPut( inKey , inValue ); return commit(); }
+//	public boolean preferencesWrite( String inKey , byte[] inValue ) { preferencesPut( inKey , inValue ); return commit(); }
+//	public boolean preferencesWrite( String inKey , byte[] inValue , String inEncoding ) throws UnsupportedEncodingException { preferencesPut( inKey , inValue , inEncoding ); return commit(); }
+//	public boolean preferencesWriteUTF8( String inKey , byte[] inValue ) throws UnsupportedEncodingException { return preferencesWrite( inKey , inValue , "UTF-8" ); }
+	public boolean preferencesWrite( String inKey , String inValue ) { preferencesPut( inKey , inValue ); return commit(); }
+	public boolean preferencesWrite( String inKey , String[] inValue ) { preferencesPut( inKey , inValue ); return commit(); }
+	public boolean preferencesWrite( String inKey , Collection<String> inValue ) { preferencesPut( inKey , inValue ); return commit(); }
+	
+	
+	public int preferencesGet( String inKey , int inMissing ) { return getPreferences().getInt( inKey , inMissing ); }
+	public long preferencesGet( String inKey , long inMissing ) { return getPreferences().getLong( inKey , inMissing ); }
+	public float preferencesGet( String inKey , float inMissing ) { return getPreferences().getFloat( inKey , inMissing ); }
+	public boolean preferencesGet( String inKey , boolean inMissing ) { return getPreferences().getBoolean( inKey , inMissing ); }
+	public String preferencesGet( String inKey , String inMissing ) { return getPreferences().getString( inKey , inMissing ); }
+	public Object preferencesGet( String inKey ) { return getPreferences().contains( inKey ) ? getPreferences().getAll().get( inKey ) : null; }
+	
+	public List<String> preferencesCopyStringList( String inKey ) { return Arrays.asList( preferencesCopyStrings( inKey ) ); }
+	public String[] preferencesCopyStrings( String inKey ) { String string = getPreferences().getString( inKey , null ); return ( null == string ) ? null : string.split( kSeparator ); }
+	public byte[] preferencesCopyBytes( String inKey ) { String string = getPreferences().getString( inKey , null ); return ( null == string ) ? null : string.getBytes(); }
+	public byte[] preferencesCopyBytes( String inKey , String inEncoding ) throws UnsupportedEncodingException { String string = getPreferences().getString( inKey , null ); return ( null == string ) ? null : string.getBytes( inEncoding ); }
+	public byte[] preferencesCopyBytesUTF8( String inKey ) throws UnsupportedEncodingException { String string = getPreferences().getString( inKey , null ); return ( null == string ) ? null : string.getBytes( "UTF-8" ); }
+//	public String preferencesFetchString( String inKey , String inMissing ) { return getPreferences().getString( inKey , inMissing ); }
+//	public int preferencesFetchInteger( String inKey , int inMissing ) { return getPreferences().getInt( inKey , inMissing ); }
+//	public long preferencesFetchLong( String inKey , long inMissing ) { return getPreferences().getLong( inKey , inMissing ); }
+//	public float preferencesFetchFloat( String inKey , float inMissing ) { return getPreferences().getFloat( inKey , inMissing ); }
+//	public boolean preferencesFetchBoolean( String inKey , boolean inMissing ) { return getPreferences().getBoolean( inKey , inMissing ); }
+//	public Object preferencesFetch( String inKey ) { return getPreferences().contains( inKey ) ? getPreferences().getAll().get( inKey ) : null; }
+
+	
+	public class MyBinder extends Binder {
+		public IHRService getService() {
+			return IHRService.this;
+		}
+	}
+}

@@ -1,0 +1,162 @@
+package com.troubadorian.streamradio.client.view;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.os.Handler;
+import android.os.Message;
+import android.os.SystemClock;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
+
+class AnimatingImageView extends SurfaceView implements SurfaceHolder.Callback , Handler.Callback, Runnable {
+	Thread					mThread;
+	
+	int						mValid;
+	int						mIndex;
+	int						mFrames;
+	long					mDuration;
+	
+	int						mSurfaceWidth;
+	int						mSurfaceHeight;
+	
+	public AnimatingImageView( Context context ) {
+		super( context );
+		
+		getHolder().addCallback( this );
+	}
+	
+	public void animateFor( long inDuration , int inFrames ) {
+		mIndex = 0;
+		mFrames = inFrames;
+		mDuration = inDuration;
+		mThread = new Thread( this , this.getClass().getSimpleName() );
+		
+		if ( 0 != mValid ) {
+			mThread.start();	//	wait for surface to be created
+		}
+	}
+	
+	public void animateFPS( int inFPS , int inFrames ) {
+		animateFor( ( inFrames > 0 ? 1000L * inFrames : 1000L ) / ( inFPS > 0 ? inFPS : 12 ) , inFrames );
+	}
+	
+	public int getSurfaceWidth() {
+		int					result = getHolder().getSurfaceFrame().width();
+		
+		return ( result > 0 ) ? result : mSurfaceWidth;
+	}
+	
+	public int getSurfaceHeight() {
+		int					result = getHolder().getSurfaceFrame().height();
+		
+		return ( result > 0 ) ? result : mSurfaceHeight;
+	}
+	
+	public void setFixedSize( Bitmap inBitmap ) {
+		int					width , height;
+		SurfaceHolder		holder = getHolder();
+		
+		if ( null == inBitmap ) inBitmap = advanceBitmap( 0 );
+		
+		width = inBitmap.getWidth();
+		height = inBitmap.getHeight();
+		
+		holder.setFixedSize( width , height );
+//		setMeasuredDimension( width , height );
+		setMinimumHeight( height );
+		setMinimumWidth( width );
+		
+		mSurfaceWidth = width;
+		mSurfaceHeight = height;
+	}
+	
+	public void surfaceChanged( SurfaceHolder holder , int format , int width , int height ) {
+		mValid = -1;
+	}
+	
+	public void surfaceCreated( SurfaceHolder holder ) {
+		if ( 0 == mValid && null != mThread && Thread.State.NEW == mThread.getState() ) {
+			mThread.start();
+		}
+		
+		mValid = 1;
+	}
+	
+	public void surfaceDestroyed( SurfaceHolder holder ) {
+		mValid = 0;
+	}
+	
+	public boolean handleMessage( Message msg ) {
+		return false;
+	}
+	
+	public String advanceName( int inPosition ) {
+		return "frame_" + inPosition;
+	}
+	
+	public int advanceID( int inPosition ) {
+		return getResources().getIdentifier( advanceName( inPosition ) , "drawable" , getContext().getPackageName() );
+	}
+	
+	public Bitmap advanceBitmap( int inPosition ) {
+		return BitmapFactory.decodeResource( getResources() , advanceID( inPosition ) );
+	}
+	
+	public void drawInCanvas( Canvas canvas ) {
+		Bitmap				bitmap = advanceBitmap( mIndex );
+		
+		if ( null != bitmap ) {
+			canvas.drawBitmap( bitmap , 0 , 0 , null );
+		}
+	}
+	
+	public void drawInThread() {
+		SurfaceHolder		holder = getHolder();
+		Canvas				canvas = holder.lockCanvas();
+		
+		if ( null != canvas ) {
+			drawInCanvas( canvas );
+			
+			holder.unlockCanvasAndPost( canvas );
+		}
+	}
+	
+	public void enterAnimation() {}
+	public void leaveAnimation() {}
+	
+	public void run() {
+		long				started = SystemClock.uptimeMillis();
+		long				current;
+		long				desired;
+		
+		enterAnimation();
+		
+		//	does not skip frames attempting to match real time
+		
+		do {
+			current = SystemClock.uptimeMillis();
+			
+			if ( mFrames > 0 ) {
+				desired = mIndex * mDuration / mFrames;
+			} else {
+				desired = mIndex * mDuration;	//	duration is time per frame
+			}
+			
+			if ( current - started < desired ) try {
+				Thread.sleep( desired - ( current - started ) );
+			} catch ( Exception e ) {}
+			
+			drawInThread();
+			mIndex += 1;
+			
+			if ( mFrames > 0 && !( mIndex < mFrames ) ) {
+				break;
+			}
+		} while ( mValid != 0 );
+		
+		leaveAnimation();
+	}
+	
+}

@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	android:background="@drawable/transport_background"
+	android:layout_centerHorizontal="true"
+	android:layout_width="wrap_content"
+	android:layout_height="wrap_content">
+	
+	<TextView
+		android:id="@+id/FavoriteTitle"
+		android:layout_height="wrap_content"
+		android:layout_width="fill_parent"
+		android:layout_margin="10px"
+		android:text='Favorites'
+		android:gravity="center"
+		android:maxLines='1'
+		android:textColor="#ffffffff"
+		android:textSize="16px"
+		android:typeface="sans"
+	/>
+	
+	<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+		android:id="@+id/FavoriteOptions"
+		android:layout_centerHorizontal="true"
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:layout_below='@id/FavoriteTitle'>
+		
+		<ImageView
+			android:id='@+id/FavoriteStationCheck'
+			android:src='@drawable/checkbox_unchecked'
+			android:layout_width='wrap_content'
+			android:layout_height='wrap_content'
+		/>
+		
+		<TextView
+			android:id="@+id/FavoriteStationLabel"
+			android:layout_height="wrap_content"
+			android:layout_width="wrap_content"
+			android:layout_marginLeft="15px"
+			android:layout_marginBottom="2px"
+			android:layout_toRightOf='@+id/FavoriteStationCheck'
+			android:layout_alignBottom='@+id/FavoriteStationCheck'
+			android:text="@string/lbl_this_station"
+			android:textColor="#ffffffff"
+			android:textSize="16px"
+			android:typeface="sans"
+		/>
+	</RelativeLayout>
+	
+	<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+		android:id="@+id/FavoriteButtons"
+		android:layout_margin='10px'
+		android:layout_centerHorizontal="true"
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:layout_below='@id/FavoriteOptions'>
+		
+		<ImageView
+			android:id='@+id/FavoriteCancel'
+			android:src='@drawable/favorite_cancel'
+			android:layout_width='wrap_content'
+			android:layout_height='wrap_content'
+		/>
+		
+		<ImageView
+			android:id='@+id/FavoriteChange'
+			android:src='@drawable/favorite_save'
+			android:layout_marginLeft='30px'
+			android:layout_width='wrap_content'
+			android:layout_height='wrap_content'
+			android:layout_toRightOf='@id/FavoriteCancel'
+		/>
+	</RelativeLayout>
+	
+</RelativeLayout>

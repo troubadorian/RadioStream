@@ -1,0 +1,1314 @@
+package com.troubadorian.streamradio.model;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.Date;
+import java.util.Timer;
+
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.util.Log;
+
+import com.troubadorian.streamradio.client.model.IHRHashtable;
+import com.troubadorian.streamradio.client.model.IHRVector;
+import com.troubadorian.streamradio.client.services.IHRService;
+
+public class IHRCache extends BroadcastReceiver implements IHRHTTPDelegate {
+	//**
+	public static final String	kMessageCache = "com.clearchannel.iheartradio.cache";
+	public static final String	kMessageProgress = "com.clearchannel.iheartradio.progress";
+	
+	public static final String	kCachePath = "Streamradio/";
+	public static final String	kPreferenceKeyResumeData = "CacheResumeData";
+	/*/
+	public static final String	kCachePath = "BlackBerry/documents/Streamradio/";
+	public static final long	kPreferenceKeyResumeData = 0x4948524361636865L;	//	IHRCache
+	
+	public static IHRCache		sCache;
+	/**/
+	
+	public static final String	kFlattenDelimiter = "\n";
+	public static final String[]kFlattenKeys = { "url" , "path" , "resume" , "paused" , "offset" , "length" , "options" , "identifier" };
+	
+	public static final String	kNotifyNameAvailable = "IHRCacheAvailable";
+	public static final String	kNotifyNameDownload = "IHRCacheResults";
+	public static final String	kNotifyNameData = "IHRCacheData";
+	
+	public static final int		kStateAbsent = 0;
+	public static final int		kStateQueued = 1;
+	public static final int		kStateOnDisk = 2;
+	public static final int		kStateLoaded = 3;
+	public static final int		kStatePaused = 4;
+	public static final int		kStateFailed = 9;
+	
+	public static final int		kOptionReload = 0x01;
+	public static final int		kOptionResume = 0x02;
+	public static final int		kOptionPaused = 0x04;
+	public static final int		kOptionRepeat = 0x08;
+	public static final int		kOptionUpdate = 0x10;
+	public static final int		kOptionAtomic = 0x20;
+	public static final int		kOptionNotify = 0x40;
+	public static final int		kOptionSerial = 0x80;
+	
+	public static final int		kOptionSingle = kOptionUpdate | kOptionRepeat | kOptionAtomic;
+	
+	public static final int		kResumeRemove = 0;
+	public static final int		kResumeEnable = 1;
+	public static final int		kResumeUpdate = 3;
+	public static final int		kResumeMarked = 4;
+	public static final int		kResumeCancel = 8;
+	
+	public static final int		kOrderRemove = -1;
+	public static final int		kOrderPaused = 0;
+	public static final int		kOrderResume = 1;
+	public static final int		kOrderAppend = 3;
+	public static final int		kOrderInsert = 4;
+	
+	public static final String	keyPaused = "paused";
+	
+	private IHRVector			mOrder;			//	order of serialized downloads
+	private IHRHashtable		mQueue;			//	table of all downloads
+	private IHRHashtable		mBuffer;		//	table of cached data when no disk store available
+	private IHRHashtable		mUpdate;		//	table of dates when items last downloaded
+	private String				mCacheRoot;		//	path to downloaded files or empty
+	private Timer				mTimer;			//	timer used to schedule retries
+	
+	public static IHRHashtable	sRelativePaths;
+	
+	public static IHRCache shared() {
+		//**
+		return IHRService.g.mCache;
+		/*/
+		if ( null == sCache ) sCache = new IHRCache();
+		
+		return sCache;
+		/**/
+	}
+	
+	public IHRCache() {
+		mQueue = new IHRHashtable();
+		
+		//**
+		IHRService.g.registerReceiver( this , new IntentFilter( Intent.ACTION_MEDIA_MOUNTED ) );
+		IHRService.g.registerReceiver( this , new IntentFilter( Intent.ACTION_MEDIA_REMOVED ) );
+		/*/
+		FileSystemRegistry.addFileSystemListener( this );
+		/**/
+	}
+	
+	public void destroy() {
+		prepareDownloadsBeforeQuit();
+		
+		//**
+		IHRService.g.unregisterReceiver( this );
+		/*/
+		FileSystemRegistry.removeFileSystemListener( this );
+		/**/
+		
+		if ( null != mBuffer ) mBuffer.clear();
+		if ( null != mUpdate ) mUpdate.clear();
+	}
+	
+	public Timer timer() {
+		if ( null == mTimer ) mTimer = new Timer();
+		
+		return mTimer;
+	}
+	
+	public void debugLog( String inMethod , String inMessage ) {
+		//**
+		Log.d( "### " + inMethod , inMessage );
+		/*/
+		System.out.println( "### " + inMethod + " " + inMessage );
+		/**/
+	}
+	
+	public void setCacheRoot( String inPath ) {
+		//**
+		String					separator = File.separator;
+		/*/
+		String					separator = System.getProperty( "file.separator" );
+//		String					separator = "/";
+		/**/
+		
+		mCacheRoot = ( null == inPath || inPath.endsWith( separator ) ) ? inPath : ( inPath + separator );
+		
+		debugLog( "setCacheRoot" , "mCacheRoot = '" + mCacheRoot + "'" );
+	}
+	
+	public String pathForFolder() {
+		String					result = mCacheRoot;
+		String					item;
+		IHRFile					file;
+		
+		if ( null == result ) {
+			String				path = kCachePath;
+			String				root = null;
+			
+			long				size , best = 20000000;			//	minimum free space for new cache
+			boolean				exists , canWrite , isDirectory;
+			
+			IHRVector			list = new IHRVector();
+			int					index , count;
+			
+			/**/
+			item = System.getenv( "EXTERNAL_STORAGE" );
+			if ( null != item && 0 != item.length() ) list.add( item + File.separator );
+			
+			for ( File test : IHRFile.listRoots() ) {
+				item = test.getAbsolutePath();
+				index = item.indexOf( 0 );
+				
+				if ( index >= 0 ) item = item.substring( 0 , index );
+				if ( item.length() > 0 && !list.contains( item ) ) list.add( item );
+			}
+			
+			item = System.getProperty( "java.io.tmpdir" );	//File.createTempFile( null , null , null );
+			if ( null != item && 0 != item.length() && !list.contains( item ) ) list.add( item + File.separator );
+			
+//			item = IHRService.g.getCacheDir().getAbsolutePath();
+//			item = IHRService.g.getDir( "cache" , Context.MODE_WORLD_READABLE ).getAbsolutePath();
+			/*/
+			for ( Enumeration list = FileSystemRegistry.listRoots() ; list.hasMoreElements() ;  ) {
+				item = (String)list.nextElement();				//	root includes trailing separator
+				
+				list.add( item );
+			}
+			/**/
+			
+			count = list.size();
+			for ( index = 0 ; index < count ; ++index ) {
+				item = (String)list.get( index );
+				
+				try {
+					file = new IHRFile( item + path );
+					isDirectory = file.isDirectory();
+					canWrite = file.canWrite();
+					exists = file.exists();
+					file.close();
+					
+					if ( canWrite && isDirectory ) {
+						root = item + path;
+						best = 0;
+						break;									//	existing directory
+					} else if ( exists ) {
+						continue;								//	file or not writable
+					}
+				} catch ( Exception e ) {}
+				
+				try {
+					size = IHRFile.freeSpace( item );
+					file = new IHRFile( item );
+					isDirectory = file.isDirectory();
+					canWrite = file.canWrite();
+					file.close();
+					
+					if ( canWrite && isDirectory && size > best ) {
+						best = size;
+						root = item + path;
+					}
+				} catch ( Exception e ) {}
+			}
+			
+			if ( null == root ) {
+				mCacheRoot = "";								//	no suitable location found
+			} else if ( 0 == best ) {
+				mCacheRoot = result = root;						//	existing location found
+			} else {
+				try {
+					file = new IHRFile();
+					file.openCreatingParents( root );
+					file.close();
+					
+					mCacheRoot = result = root;					//	new directory created
+				} catch ( Exception e ) {}
+			}
+			
+			debugLog( "pathForFolder" , "mCacheRoot = '" + mCacheRoot + "'" );
+		} else if ( 0 == result.length() ) {
+			result = null;										//	previous attempt failed
+		}
+		
+		return result;
+	}
+	
+	public IHRFile openForFolder() throws IOException {
+		String					root = pathForFolder();
+		
+		return ( null == root ) ? null : new IHRFile( root );
+	}
+	
+	public long freeSpace() {
+		String					root = pathForFolder();
+		
+		return ( null == root ) ? 0 : IHRFile.freeSpace( root );
+	}
+	
+	public double freeRatio() {
+		String					root = pathForFolder();
+		
+		return ( null == root ) ? -1.0 : IHRFile.freeRatio( root );
+	}
+	
+	public static byte[] dataForPath( String inPath ) {
+		byte[]					result = null;
+		
+		try {
+			IHRFile		file = new IHRFile( inPath );
+			
+			result = file.data();
+			
+			file.close();
+		} catch ( Exception e ) {}
+		
+		return result;
+	}
+	
+	public boolean available() {
+		String					root = pathForFolder();
+		
+		return ( null != root && 0 != root.length() );
+	}
+	
+	public void deleteFileCache() {
+		stopDownloads( true );
+		
+		try {
+			String				root = pathForFolder();
+			
+			if ( null != root && 0 != root.length() ) {
+				IHRFile.deleteFolder( root , 1 );
+			}
+		} catch ( Exception e ) {}
+		
+		if ( null != mBuffer ) {
+			synchronized ( mBuffer ) {
+				mBuffer.clear();
+				mBuffer = null;
+			}
+		}
+	}
+	
+	public static String relativePathForURL( String inURL ) {
+		String					result = "";
+		
+		if ( null == sRelativePaths ) {
+			sRelativePaths = new IHRHashtable();
+		} else if ( sRelativePaths.containsKey( inURL ) ) {
+			return (String)sRelativePaths.get( inURL );
+		}
+		
+		int						length = inURL.length();
+		int						scheme = inURL.indexOf( "://" );
+		int						domain = inURL.indexOf( '/' , scheme + 3 );
+		int						extras = inURL.indexOf( '?' , domain + 1 );
+		
+		if ( extras < 0 ) extras = inURL.indexOf( '#' , domain + 1 );
+		if ( extras < 0 ) extras = length;
+		
+		int						starts = inURL.lastIndexOf( '/' , extras );
+		
+		String					name = inURL.substring( starts + 1 , extras );
+		
+		if ( starts > domain ) {
+			String				path = inURL.substring( domain , starts );
+			
+			//**
+			String				make = path.replaceAll( "\\W+" , "" );
+			/*/
+			String[]			word = StringUtilities.stringToKeywords( path );
+			StringBuffer		join = new StringBuffer();
+			
+			for ( int i = 0 ; i < word.length ; ++i ) join.append( word[i] );
+			
+			String				make = join.toString();
+			/**/
+			
+			if ( make.length() < 4 ) make = make + path.hashCode();
+			if ( make.length() > 24 ) make = make.substring( 0 , 24 );
+			
+			result += make + "/";
+		}
+		
+		if ( length > extras ) {
+			result += inURL.substring( extras ).hashCode() + "_";
+		}
+		
+		if ( name.length() > 2 ) {
+			//**
+			String				text = name.replaceAll( "%\\p{XDigit}{2}" , "-" );
+			
+			text = text.replaceAll( "[^()!.,\\w]+" , "-" );
+			/*/
+			StringBuffer		buffer = new StringBuffer();
+			int					index , count = name.length();
+			boolean				dash = false;
+			
+			for ( index = 0 ; index < count ; ++index ) {
+				char letter = name.charAt( index );
+				
+				if ( CharacterUtilities.isLetter( letter ) || Character.isDigit( letter ) || letter == '.' || letter == ',' ) {
+					if ( dash ) { buffer.append( '-' ); dash = false; }
+					
+					buffer.append( letter );
+				} else {
+					dash = true;
+					
+					if ( letter == '%' ) index += 2;
+				}
+			}
+			
+			String				text = buffer.toString();
+			/**/
+			
+			if ( text.length() < 4 ) text = text + name.hashCode();
+			if ( text.length() > 48 ) text = text.substring( text.length() - 48 );
+			
+			name = text;
+		}
+		
+		result += name;
+		
+		sRelativePaths.put( inURL , result );
+		
+		return result;
+	}
+	
+	public static String nameForURL( String inURL ) {
+		String					path = relativePathForURL( inURL );
+		
+		return path.substring( path.lastIndexOf( '/' ) + 1 );
+	}
+	
+	public String pathForURL( String inURL ) {
+		String					root = pathForFolder();
+		
+		return ( null == root ? "" : root ) + relativePathForURL( inURL );
+	}
+	
+	public IHRFile openForURL( String inURL ) throws IOException {
+		return new IHRFile( pathForURL( inURL ) );
+	}
+	
+	public int sizeForURL( String inURL ) {
+		int						result = -1;
+		String					path = relativePathForURL( inURL );
+		Object					value = null;
+		
+		if ( null != mBuffer ) {
+			synchronized( mBuffer ) {
+				value = mBuffer.get( path );
+			}
+		}
+		
+		if ( null == value ) {
+			try {
+				IHRFile				file = openForURL( inURL );
+				long				size;
+				
+				if ( file.isDirectory() ) {
+					result = -2;
+				} else if ( file.exists() ) {
+					size = file.fileSize();
+					result = ( size > Integer.MAX_VALUE ) ? Integer.MAX_VALUE : (int)size;
+				}
+				
+				file.close();
+			} catch ( Exception e ) {}
+		} else if ( value instanceof IHRVector ) {
+			int				index , count = ((IHRVector)value).size();
+			
+			result = 0;
+			
+			for ( index = 0 ; index < count ; ++index ) {
+				result += ((byte[])((IHRVector)value).get( index )).length;
+			}
+		} else if ( value instanceof byte[] ) {
+			result = ((byte[])value).length;
+		} 
+		
+		if ( -1 == result ) {
+			if ( null != itemForURL( inURL ) ) {
+				result = 0;
+			}
+		}
+		
+//		debugLog( "sizeForURL" , "" + result + " " + inURL );
+		
+		return result;
+	}
+	
+	public byte[] bitsForURL( String inURL ) {
+		byte[]					result = null;
+		String					path = relativePathForURL( inURL );
+		Object					value = null;
+		
+		if ( null != mBuffer ) {
+			synchronized( mBuffer ) {
+				value = mBuffer.get( path );
+			}
+		}
+		
+		if ( null == value ) {
+			String				root = pathForFolder();
+			
+			if ( null != root ) result = dataForPath( root + path );
+		} else if ( value instanceof IHRVector ) {
+			int				index , count = ((IHRVector)value).size();
+			int				length = 0;
+			byte[]			source;
+			
+			for ( index = 0 ; index < count ; ++index ) {
+				source = ((byte[])((IHRVector)value).get( index ));
+				length += source.length;
+			}
+			
+			if ( 1 == count ) {
+				result = ((byte[])((IHRVector)value).get( 0 ));
+				count = 0;
+			} else {
+				result = new byte[length];
+				length = 0;
+			}
+			
+			for ( index = 0 ; index < count ; ++index ) {
+				source = ((byte[])((IHRVector)value).get( index ));
+				
+				System.arraycopy( source , 0 , result , length , source.length );
+				length += source.length;
+			}
+			
+			((IHRVector)value).clear();
+			
+			synchronized( mBuffer ) {
+				mBuffer.put( path , result );
+			}
+		} else if ( value instanceof byte[] ) {
+			result = (byte[])value;
+		}
+		
+//		debugLog( "bitsForURL" , "" + ( null == result ? 0 : result.length ) + " " + inURL );
+		
+		return result;
+	}
+	
+	public byte[] dataForURL( String inURL ) {
+		return ( null == itemForURL( inURL ) ) ? bitsForURL( inURL ) : null;
+	}
+	
+	public void clearUpdateForURL( String inURL ) {
+		if ( null != mUpdate ) mUpdate.remove( inURL );
+	}
+	
+	public Date updateForURL( String inURL ) {
+		return ( null == mUpdate ) ? null : (Date)mUpdate.get( inURL );
+	}
+	
+	public Date updateForURL( String inURL , long inMaximumInterval , String inIdentifier , String inSite ) {
+		Date					result = updateForURL( inURL );
+		
+//		debugLog( "updateForURL" , "" + result + " " + inIdentifier + " " + inURL );
+		
+		if ( null == result || ( inMaximumInterval > 0 && ( ( new Date() ).getTime() - result.getTime() ) > ( inMaximumInterval * 1000L ) ) ) {
+			int					options = kOptionUpdate;
+			
+			if ( null != result ) options |= kOptionReload;
+			
+			cacheFileWithURL( inURL , options , inIdentifier , inSite );
+		}
+		
+		return result;
+	}
+	
+	public byte[] dataForURL( String inURL , long inMaximumInterval , String inIdentifier , String inSite ) {
+		byte[]					result = dataForURL( inURL );
+		
+		updateForURL( inURL , inMaximumInterval , inIdentifier , inSite );
+		
+		return result;
+	}
+	
+	public IHRHashtable progressForURL( String inURL ) {
+		IHRHashtable			result = new IHRHashtable();
+		IHRHashtable			dictionary = itemForURL( inURL );
+		IHRCacheConnection		connection = ( null == dictionary ) ? null : (IHRCacheConnection)dictionary.get( "connection" );
+		IHRFile					file = null;
+		String					path = null;
+		
+		result.put( "url" , inURL );
+		
+		if ( null != connection ) {
+			connection.resumePosition( result );
+		} else if ( null != dictionary && dictionary.booleanValue( "paused" , false ) ) {
+			result.putFrom( "paused" , dictionary );
+			result.putFrom( "offset" , dictionary );
+			result.putFrom( "length" , dictionary );
+		} else {
+			path = pathForURL( inURL );
+			file = new IHRFile( path );
+		}
+		
+		if ( null != dictionary ) {
+			result.put( "queued" , Boolean.TRUE );
+		}
+		
+		if ( null != file ) {
+			try {
+				Long			size = new Long( file.fileSize() );
+				
+				result.put( "offset" , size );
+				result.put( "length" , size );
+			} catch ( IOException e ) {}
+			
+			result.put( "path" , path );
+			
+			file.close();
+		}
+		
+//		debugLog( "progressForURL" , "" + result.booleanValue( "paused" , false ) + " " + result.integerValue( "offset" , 0 ) + "/" + result.integerValue( "offset" , 0 ) + " " + inURL );
+		
+		return result;
+	}
+	
+	public int stateForFileWithURL( String inURL ) {
+		int						result = kStateAbsent;
+		IHRHashtable			item = itemForURL( inURL );
+		
+		if ( null == item ) {
+			String				path = relativePathForURL( inURL );
+			
+			if ( null != mBuffer ) {
+				synchronized( mBuffer ) {
+					if ( null != mBuffer.get( path ) ) {
+						result = kStateOnDisk;
+					}
+				}
+			}
+			
+			try {
+				String			root = pathForFolder();
+				IHRFile			file = ( null == root ) ? null : new IHRFile( root + path );
+				
+				if ( null != file ) {
+					if ( file.exists() && !file.isDirectory() ) {
+						result = kStateOnDisk;
+						
+						if ( null == mQueue || 0 == mQueue.size() ) {
+							if ( this.hasResumeDataForURL( inURL ) ) {
+								result = kStatePaused;
+							}
+						}
+					}
+					
+					file.close();
+				}
+			} catch ( Exception e ) {}
+		} else if ( item.booleanValue( keyPaused , false ) ) {
+			result = kStatePaused;
+		} else {
+			result = kStateQueued;
+		}
+		
+//		debugLog( "stateForURL" , "" + result + " " + inURL );
+		
+		return result;
+	}
+	
+	public void coalesceNetworkActiviy( boolean inActive ) {
+		
+	}
+	
+	public void broadcast( String inName , IHRHashtable inDetails ) {
+		//**
+		IHRService.g.mBroadcaster.notifyOnMainThread( inName , inDetails );
+		IHRService.g.mConfiguration.notifyClient( inName , inDetails );
+		/*/
+		IHRBroadcaster.common().notifyOnMainThread( inName , inDetails );
+		/**/
+	}
+	
+	public void notify( IHRHashtable inDictionary , boolean inIncludePath , String inKey , Object inExtra ) {
+		IHRHashtable			details = new IHRHashtable();
+		
+		if ( null == inDictionary ) {
+			details.put( "url" , "" );
+		} else {
+			details.putFrom( "url" , inDictionary );
+			details.putFrom( "identifier" , inDictionary );
+			
+			if ( inIncludePath ) {
+				details.putFrom( "path" , inDictionary );
+			}
+			
+//			debugLog( "notify" , inKey + " " + inDictionary.stringValue( "identifier" , "identifier" ) + " " + inDictionary.stringValue( "path" , "path" ) + " " + inDictionary.stringValue( "url" , "url" ) );
+		}
+		
+		if ( null != inKey ) {
+			details.put( inKey , ( null == inExtra ) ? Boolean.TRUE : inExtra );
+		}
+		
+		broadcast( IHRCache.kNotifyNameDownload , details );
+	}
+	
+	private IHRHashtable itemForURL( String inURL ) {
+		IHRHashtable			result = null;
+		
+		if ( null != mQueue ) {
+			synchronized( mQueue ) {
+				result = (IHRHashtable)mQueue.get( inURL );
+			}
+		}
+		
+		return result;
+	}
+	
+	private void enqueue( IHRHashtable inDictionary , String inURL ) {
+		IHRHashtable			dictionary = itemForURL( inURL );
+		
+		boolean					np = ( null == inDictionary ) ? false : inDictionary.booleanValue( "paused" , false );
+		boolean					op = ( null == dictionary ) ? false : dictionary.booleanValue( "paused" , false );
+		
+		if ( null == inDictionary ) {
+			if ( null != mQueue ) synchronized( mQueue ) { mQueue.remove( inURL ); }
+		} else {
+			if ( null == mQueue ) mQueue = new IHRHashtable();
+			
+			synchronized( mQueue ) { mQueue.put( inURL , inDictionary ); }
+		}
+		
+		if ( np ) inDictionary = null;
+		if ( op ) dictionary = null;
+		
+		if ( ( null == inDictionary ) != ( null == dictionary ) ) {
+			coalesceNetworkActiviy( null != inDictionary );
+		}
+	}
+	
+	public int orderFileWithURL( String inURL , int inAction ) {
+		if(true) return 0;//GW: disable smart download
+		int						result = 0;
+		int						index , count;
+		
+		if ( null == mOrder ) {
+			if ( inAction >= kOrderAppend ) mOrder = new IHRVector();
+			index = -1;
+			count = 0;
+		} else {
+			count = mOrder.size();
+			index = mOrder.indexOf( inURL );
+		}
+		
+		if ( inAction <= kOrderRemove && !( index < 0 ) ) {
+			mOrder.removeElementAt( index );
+		}
+		
+		if ( 0 == index ) {
+			if ( count > 1 ) {
+				if ( inAction == kOrderPaused ) mOrder.swapElementsAt( 0 , 1 );		//	paused so unpause next
+				if ( inAction <= kOrderPaused ) unpause( (String)mOrder.get( 0 ) );	//	paused or deleted
+			}
+		} else if ( index > 0 ) {
+			if ( inAction == kOrderResume || inAction == kOrderInsert ) {
+				mOrder.swapElementsAt( 0 , index );									//	move to head of list
+				pause( (String)mOrder.get( index ) );								//	pause previous head
+			}
+			if ( inAction == kOrderAppend || inAction == kOrderPaused ) {
+				result = index;														//	return order in queue
+			}
+		} else if ( inAction == kOrderAppend ) {
+			mOrder.add( inURL );													//	append to list
+			result = index;
+		} else if ( inAction == kOrderInsert ) {
+			mOrder.insertElementAt( inURL , 0 );									//	insert in list
+			pause( (String)mOrder.get( 1 ) );										//	pause previous head
+		} else {
+			result = index;
+		}
+		
+		return result;
+	}
+	
+	public int cacheFileWithURL( String inURL , int inOptions , String inIdentifier , String inSite ) {
+		int						result = stateForFileWithURL( inURL );
+		
+		if ( kStateOnDisk == result && 0 != ( inOptions & kOptionReload ) ) {
+			result = kStateAbsent;			//	ignore file on disk
+		}
+		
+		if ( kStateOnDisk == result && 0 != ( inOptions & kOptionUpdate ) ) {
+			if ( null == updateForURL( inURL ) ) {
+				result = kStateAbsent;		//	ignore file on disk if not cached this session
+			}
+		}
+		
+		if ( kStateAbsent == result ) {
+			String				path = pathForURL( inURL );
+			IHRHashtable		dictionary = new IHRHashtable();
+			
+			dictionary.put( "identifier" , null == inIdentifier ? "" : inIdentifier );
+			dictionary.put( "options" , new Integer( inOptions ) );
+			dictionary.put( "path" , path );
+			dictionary.put( "site" , inSite );
+			dictionary.put( "url" , inURL );
+			
+			enqueue( dictionary , inURL );
+			
+			if ( 0 != ( inOptions & kOptionSerial ) ) {
+				if ( orderFileWithURL( inURL , kOrderAppend ) > 0 ) inOptions |= kOptionPaused;
+			}
+			
+			if ( 0 != ( inOptions & kOptionPaused ) ) {
+				dictionary.put( "offset" , new Integer( 0 ) );
+				dictionary.put( "length" , new Integer( 1 ) );
+				dictionary.put( "paused" , Boolean.TRUE );
+				
+				result = kStatePaused;
+			}
+			
+			debugLog( "cacheFileWithURL" , "" + ( result == kStatePaused ? "pause" : "queue" ) + " " + inIdentifier + " " + inURL );
+			
+			if ( result != kStatePaused ) {
+				IHRCacheConnection	connection = new IHRCacheConnection( inURL , this , inSite );
+				
+				dictionary.put( "connection" , connection );
+				
+				connection.setDeletesFileUponFailure( 0 != ( inOptions & kOptionResume ) );
+				connection.setDestination( path , true );
+				
+				result = kStateQueued;
+			}
+		}
+		
+		return result;
+	}
+	
+	public int cacheAudioWithURL( String inURL , int inOptions , String inIdentifier , String inSite ) {
+		return cacheFileWithURL( inURL , inOptions | kOptionNotify | kOptionResume | kOptionSerial , inIdentifier , inSite );
+	}
+	
+	public boolean hasResumeDataForURL( String inURL ) {
+		boolean					result = false;
+		
+		IHRFile					file = new IHRFile( pathForFolder() + "resume.dds" , false );
+		
+		if ( null != file ) {
+			if ( null == inURL || 0 == inURL.length() ) {
+				try {
+					if ( file.fileSize() > 0 ) result = true;
+				} catch ( Exception e ) {}
+			} else {
+				String			data = file.stringContents( "UTF-8" );
+				
+				if ( null != data && !( data.indexOf( inURL ) < 0 ) ) result = true;
+			}
+		}
+		
+		return result;
+	}
+	
+	public void accessResumeData( String inURL , IHRCacheConnection inConnection , int inFlags ) {
+		IHRHashtable			resume = null;
+		IHRHashtable			dictionary = null;
+		IHRHashtable			save = null;
+		String					data = null;
+		
+		IHRFile					file = new IHRFile( pathForFolder() + "resume.dds" , kResumeMarked != inFlags );
+		
+		resume = new IHRHashtable();
+		data = file.stringContents( "UTF-8" );
+		if ( null != data ) resume.restoreDDS( kFlattenKeys , kFlattenDelimiter , data , 0 );
+		data = null;
+		
+		if ( kResumeMarked == inFlags ) {
+			//**
+			for ( String key : resume.keySet() ) {
+			/*/
+			for ( Enumeration keys = resume.keys() ; keys.hasMoreElements() ; ) {
+				String			key = (String)keys.nextElement();
+			/**/
+				save = (IHRHashtable)resume.get( key );
+				inURL = (String)save.get( "url" );
+				data = (String)save.get( "resume" );
+				
+				if ( null == inURL || null == data || 0 == data.length() || null != mQueue.get( inURL ) ) continue;
+				debugLog( "accessResumeData" , "restore " + save.stringValue( "identifier" , "identifier" ) + " " + save.stringValue( "url" , "url" ) );
+				
+				dictionary = save;
+				
+				inConnection = new IHRCacheConnection( inURL , this , (String)save.get( "site" ) );
+				dictionary.put( "connection" , inConnection );
+				enqueue( dictionary , inURL );
+				
+				inConnection.setDestination( pathForURL( inURL ) , data );
+				
+				notify( dictionary , true , "resume" , Boolean.TRUE );
+			}
+		} else if ( kResumeCancel == inFlags ) {
+			debugLog( "accessResumeData" , "delete" );
+			
+			file.delete();
+		} else {
+			if ( 0 != ( kResumeEnable & inFlags ) ) {
+				dictionary = itemForURL( inURL );
+				
+				if ( kResumeUpdate == inFlags ) {
+					data = ( null == inConnection ) ? null : inConnection.resumeData();
+					
+					if ( null != dictionary ) {
+						if ( null == data ) dictionary.remove( "resume" );
+						else dictionary.put( "resume" , data );
+					}
+				} else {
+					data = ( null == dictionary ) ? null : (String)dictionary.get( "resume" );
+				}
+				
+//				debugLog( "accessResumeData" , "data " + ( null == data ? 0 : data.length() ) );
+			}
+			
+			if ( null != data ) {
+				save = new IHRHashtable();
+				
+				save.putFrom( "url" , dictionary );
+				save.putFrom( "path" , dictionary );
+				save.putFrom( "site" , dictionary );
+				save.putFrom( "resume" , dictionary );
+				save.putFrom( "paused" , dictionary );
+				save.putFrom( "offset" , dictionary );
+				save.putFrom( "length" , dictionary );
+				save.putFrom( "options" , dictionary );
+				save.putFrom( "identifier" , dictionary );
+			}
+			
+			if ( null != save || ( null != resume && null != resume.get( inURL ) ) ) {
+				if ( null == save || 0 == save.size() ) resume.remove( inURL );
+				else resume.put( inURL , save );
+				
+//				debugLog( "accessResumeData" , ( resume.containsKey( inURL ) ? "save" : "remove" ) + " " + inURL );
+				
+				if ( resume.isEmpty() ) {
+					file.delete();
+				} else {
+					data = resume.flattenDDS( kFlattenKeys , kFlattenDelimiter );
+					try {
+						file.write( data.getBytes( "UTF-8" ) , false );
+					} catch( Exception e ) {
+						debugLog( "accessResumeData" , e.getMessage() );
+					}
+				}
+			}
+			
+			if ( kResumeRemove == inFlags && null != inURL ) {
+				orderFileWithURL( inURL , kOrderRemove );
+			}
+		}
+		
+		file.close();
+	}
+	
+	public void restoreDownloadsAfterLaunch() {
+		accessResumeData( null , null , kResumeMarked );
+	}
+	
+	public void prepareDownloadsBeforeQuit() {
+		stopDownloads( false );
+	}
+	
+	public void stopDownloads( boolean inDeletingFiles ) {
+		IHRHashtable			queue = mQueue;
+		
+		mQueue = null;
+		mOrder = null;
+		
+		if ( null != queue ) {
+			synchronized ( queue ) {
+				//**
+				for ( String key : queue.keySet() ) {
+				/*/
+				for ( Enumeration keys = queue.keys() ; keys.hasMoreElements() ; ) {
+					String				key = (String)keys.nextElement();
+				/**/
+					IHRHashtable		dictionary = (IHRHashtable)queue.get( key );
+					IHRCacheConnection	connection = (IHRCacheConnection)dictionary.get( "connection" );
+					
+					if ( null != connection ) {
+						dictionary.remove( "connection" );
+						connection.setDeletesFileUponFailure( inDeletingFiles );
+						connection.cancel();
+					}
+				}
+			}
+		}
+		
+		if ( inDeletingFiles ) {
+			accessResumeData( null , null , kResumeCancel );
+		}
+		
+		if ( null != mTimer ) mTimer.cancel();
+	}
+	
+	public void pause( String inURL ) {
+		Log.i("pause" , inURL);
+		IHRHashtable			item = itemForURL( inURL );
+		IHRCacheConnection		connection = ( null == item ) ? null : (IHRCacheConnection)item.get( "connection" );
+		
+		if ( null != item ) {
+			item.put( keyPaused , Boolean.TRUE );
+			
+//			debugLog( "pause" , inURL );
+			
+			if ( null != connection ) {
+				connection.resumePosition( item );
+				orderFileWithURL( inURL , kOrderPaused );
+				didWrite( inURL , 0 );
+				item.remove( "connection" );
+				connection.setDeletesFileUponFailure( false );
+				connection.cancel();
+			}
+		}
+	}
+	
+	public void pauseAll( String inURL ) {
+		if ( null != mQueue ) {
+			synchronized( mQueue ) {
+				//**
+				for ( String url : mQueue.keySet() ) {
+				/*/
+				for ( Enumeration keys = mQueue.keys() ; keys.hasMoreElements() ; ) {
+					String				url = (String)keys.nextElement();
+				/**/
+					IHRHashtable	item = (IHRHashtable)mQueue.get( url );
+					boolean		paused = ( null == item ) ? false : item.booleanValue( "paused" , false );
+					
+					if ( null == inURL || !inURL.equals( url ) ) {
+						if ( !paused ) pause( url );
+					} else {
+						if ( paused ) unpause( inURL );
+					}
+				}
+			}
+		}
+	}
+	
+	public void unpause( String inURL ) {
+		Log.i("unpause" , inURL);
+		IHRHashtable			item = itemForURL( inURL );
+		IHRCacheConnection		connection;
+		String					path;
+		String					data;
+		
+		if ( null != item ) {
+//			debugLog( "unpause" , inURL );
+			
+			if ( item.booleanValue( "paused" , false ) || null == item.get( "connection" ) ) {
+				data = (String)item.get( "resume" );
+				path = pathForURL( inURL );
+				
+				connection = new IHRCacheConnection( inURL , this , (String)item.get( "site" ) );
+				
+				item.remove( "paused" );
+				item.remove( "offset" );
+				item.remove( "length" );
+				item.put( "connection" , connection );
+				
+				if ( null == data ) {
+					connection.setDeletesFileUponFailure( false );
+					connection.setDestination( path , true );
+				} else {
+					connection.setDestination( path , data );
+				}
+				
+				orderFileWithURL( inURL , kOrderResume );
+				notify( item , true , "resume" , Boolean.TRUE );
+				coalesceNetworkActiviy( true );
+			}
+		}
+	}
+	
+	public void unpauseAll() {
+		if ( null != mQueue ) {
+			synchronized( mQueue ) {
+				//**
+				for ( String url : mQueue.keySet() ) {
+				/*/
+				for ( Enumeration keys = mQueue.keys() ; keys.hasMoreElements() ; ) {
+					String		url = (String)keys.nextElement();
+				/**/
+					unpause( url );
+				}
+			}
+		}
+	}
+	
+	public void deleteCancel( String inURL , boolean inDelete ) {
+		IHRHashtable			dictionary = itemForURL( inURL );
+		
+//		debugLog( "deleteCancel" , "" + inDelete + " " + inURL );
+		
+		if ( null != dictionary ) {
+			IHRCacheConnection	connection = (IHRCacheConnection)dictionary.get( "connection" );
+			
+			if ( null != connection ) {
+				dictionary.remove( "connection" );
+				connection.cancel();
+				
+				inDelete = false;
+				
+				notify( dictionary , true , "cancel" , null );
+			}
+			
+			accessResumeData( inURL , connection , kResumeRemove );
+			enqueue( null , inURL );
+		}
+		
+		if ( inDelete ) {
+			String				path = relativePathForURL( inURL );
+			
+			if ( null != mBuffer ) {
+				synchronized( mBuffer ) {
+					mBuffer.remove( path );
+				}
+			}
+			
+			try {
+				String			root = pathForFolder();
+				IHRFile			file = ( null == root ) ? null : new IHRFile( root + path );
+				
+				if ( null != file ) {
+					file.deleteWithEmptyParent();
+					file.close();
+					
+					if ( null == dictionary ) {
+						dictionary = new IHRHashtable();
+						dictionary.put( "url" , inURL );
+						dictionary.put( "path" , root + path );
+					}
+					
+					notify( dictionary , true , "delete" , null );
+				}
+			} catch ( Exception e ) {}
+		}
+	}
+	
+	public void cancel( String inURL ) { deleteCancel( inURL , false ); }
+	public void delete( String inURL ) { deleteCancel( inURL , true ); }
+	
+	
+	public void httpFetchComplete( IHRHTTP inHTTP ) {
+		/**
+		String					url = inHTTP.getURL();
+		
+		if ( inHTTP.mSuccess ) {
+			didFinish( url );
+		} else {
+			didFail( url , inHTTP.mException );
+		}
+		/**/
+	}
+	
+	public void didFinish( String inURL ) {
+		IHRHashtable			dictionary = itemForURL( inURL );
+		IHRCacheConnection		connection = ( null == dictionary ) ? null : (IHRCacheConnection)dictionary.get( "connection" );
+		int						options = ( null == dictionary ) ? 0 : dictionary.integerValue( "options" , 0 );
+		
+		debugLog( "didFinish" , "" + dictionary.stringValue( "identifier" , "identifier" ) + " " + inURL );
+		accessResumeData( inURL , connection , kResumeRemove );
+		
+		if ( 0 != ( options & kOptionUpdate ) ) {
+			if ( null == mUpdate ) mUpdate = new IHRHashtable();
+			
+			mUpdate.put( inURL , new Date() );
+		}
+		
+		if ( null != dictionary ) {
+			enqueue( null , inURL );
+			notify( dictionary , true , "finish" , null );
+		}
+	}
+	
+	public void didWrite( String inURL , int inBytes ) {
+		IHRHashtable			dictionary = itemForURL( inURL );
+		IHRCacheConnection		connection = ( null == dictionary ) ? null : (IHRCacheConnection)dictionary.get( "connection" );
+		int						options = ( null == dictionary ) ? 0 : dictionary.integerValue( "options" , 0 );
+		boolean					finished = ( null == connection ) ? false : connection.hasContent();
+		
+		long					now = new Date().getTime();
+		long					previous;
+		
+		if ( 0 != ( options & kOptionResume ) && null != connection && !finished ) {
+			previous = dictionary.longValue( "time_resume" , 0 );
+			
+			//	no more than one update per connection every 10 seconds
+			if ( 0 == inBytes || 0 == previous || ( now - previous ) > 10000 ) {
+				accessResumeData( inURL , connection , kResumeUpdate );
+				dictionary.put( "time_resume" , now );
+			}
+		}
+		
+		if ( 0 != ( options & kOptionNotify ) ) {
+			previous = dictionary.longValue( "time_notify" , 0 );
+			
+			//	no more than one notification per connection per second
+			if ( 0 == inBytes || 0 == previous || finished || ( now - previous ) > 1000 ) {
+				IHRHashtable	details = new IHRHashtable();
+				
+				if ( null != connection ) connection.resumePosition( details );
+				
+				dictionary.put( "time_notify" , now );
+				details.putFrom( "url" , dictionary );
+				details.putFrom( "path" , dictionary );
+				details.putFrom( "paused" , dictionary );
+				details.putFrom( "identifier" , dictionary );
+				details.put( "bytes" , new Integer( inBytes ) );
+				
+				broadcast( kNotifyNameData , details );
+			}
+		}
+	}
+	
+	public void didFail( String inURL , Exception inError ) {
+		IHRHashtable			dictionary = itemForURL( inURL );
+		IHRCacheConnection		connection = ( null == dictionary ) ? null : (IHRCacheConnection)dictionary.get( "connection" );
+		int						options = ( null == dictionary ) ? 0 : dictionary.integerValue( "options" , 0 );
+		boolean					deletes = ( null == connection ) ? false : connection.deletesFileUponFailure();
+		
+		debugLog( "didFail" , "" + dictionary.stringValue( "identifier" , "identifier" ) + " " + inURL );
+		
+		if ( connection.isErrorRecoverable() || ( !deletes || 0 != ( options & kOptionRepeat ) ) ) {
+			connection.resumeAfter( 30 );
+			dictionary.remove( "time_resume" );
+			accessResumeData( inURL , connection , /*deletes ? kResumeRemove :*/ kResumeEnable );
+			notify( dictionary , true , "resume" , Boolean.TRUE );
+		} else {
+			accessResumeData( inURL , connection , kResumeRemove );
+			notify( dictionary , true , "error" , inError );
+		}
+		
+		deleteForBufferingPath( dictionary.stringValue( "path" , null ) );
+	}
+	
+	public void didReceive( String inURL , byte[] inData, int inOffset, int inLength ) {
+		String					path = relativePathForURL( inURL );
+		Object					value = null;
+		IHRVector				vector;
+		
+		if ( null == mBuffer ) {
+			mBuffer = new IHRHashtable();
+		} else synchronized( mBuffer ) {
+			value = mBuffer.get( path );
+		}
+		
+		if ( true/*IHRCacheConnection uses same buffer for each fetch*/ ) {
+			byte[]				buffer = new byte[inLength];
+			
+			System.arraycopy( inData , inOffset , buffer , 0 , inLength );
+			
+			inData = buffer;
+		}
+		
+		if ( value instanceof IHRVector ) {
+			((IHRVector)value).add( inData );
+		} else {
+			vector = new IHRVector();
+			vector.add( inData );
+			
+			synchronized( mBuffer ) {
+				mBuffer.put( path , vector );
+			}
+		}
+	}
+	
+	public class IHRCacheOutputStream extends OutputStream {
+		IHRVector				_vector;
+		
+		public IHRCacheOutputStream( IHRVector inVector ) { _vector = inVector; }
+		@Override
+		public void write( int b ) throws IOException { byte[] buffer = new byte[1]; buffer[0] = (byte)b; write( buffer ); }
+		@Override
+		public void write( byte[] inBuffer ) { _vector.add( inBuffer ); }
+		@Override
+		public void write( byte[] inBuffer , int inOffset , int inLength ) { byte[] buffer = new byte[inLength]; System.arraycopy( inBuffer , inOffset , buffer , 0 , inLength ); write( buffer ); }
+		
+	}
+	
+	public OutputStream streamForBufferingPath( String inPath ) {
+		IHRVector				vector = null;
+		Object					value = null;
+		
+		if ( null == mBuffer ) {
+			mBuffer = new IHRHashtable();
+		} else synchronized( mBuffer ) {
+			value = mBuffer.get( inPath );
+		}
+		
+		if ( value instanceof IHRVector ) {
+			vector = (IHRVector)value;
+		} else {
+			vector = new IHRVector();
+			
+			synchronized( mBuffer ) {
+				mBuffer.put( inPath , vector );
+			}
+		}
+		
+		return new IHRCacheOutputStream( vector );
+	}
+	
+	public void deleteForBufferingPath( String inPath ) {
+		if ( null != mBuffer && null != inPath ) {
+			synchronized( mBuffer ) {
+				mBuffer.remove( inPath );
+			}
+		}
+	}
+	
+	public void volumesChanged( boolean inRemoving , String inRoot ) {
+		IHRHashtable			details = null;
+		
+		debugLog( "volumesChanged" , "" + inRemoving + " " + inRoot );
+		
+		if ( inRemoving ) {
+			if ( inRoot.length() > 1 && mCacheRoot.startsWith( inRoot ) ) {
+				mCacheRoot = null;
+				
+				if ( null == pathForFolder() ) {
+					details = new IHRHashtable();
+					details.put( "available" , Boolean.FALSE );
+				}
+			}
+		} else {
+			if ( null == mCacheRoot || 0 == mCacheRoot.length() ) {
+				mCacheRoot = null;
+				
+				if ( null != pathForFolder() ) {
+					details = new IHRHashtable();
+					details.put( "available" , Boolean.TRUE );
+				}
+			}
+		}
+		
+		if ( null != details ) {
+			broadcast( kNotifyNameAvailable , details );
+		}
+	}
+	
+	//**
+	@Override
+	public void onReceive( Context context , Intent intent ) {
+		if ( intent.getAction().equals( Intent.ACTION_MEDIA_MOUNTED ) ) volumesChanged( false , intent.getDataString() );
+		if ( intent.getAction().equals( Intent.ACTION_MEDIA_REMOVED ) ) volumesChanged( true , intent.getDataString() );
+	}
+	/*/
+	public void rootChanged( int inState , String inRoot ) {
+		switch ( inState ) {
+			case FileSystemListener.ROOT_ADDED:
+			case FileSystemListener.ROOT_REMOVED:
+				volumesChanged( FileSystemListener.ROOT_REMOVED == inState , inRoot );
+				break;
+		}
+	}
+	/**/
+	
+}

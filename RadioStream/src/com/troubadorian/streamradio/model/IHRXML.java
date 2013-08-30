@@ -1,0 +1,117 @@
+package com.troubadorian.streamradio.model;
+
+import java.io.IOException;
+import java.util.jar.Attributes;
+
+import org.xml.sax.helpers.DefaultHandler;
+
+import com.troubadorian.streamradio.client.model.IHRPlatform;
+import com.troubadorian.streamradio.client.model.IHRPreferences;
+import com.troubadorian.streamradio.client.model.IHRURLEncoder;
+
+public class IHRXML extends DefaultHandler {
+	public static final String			kURLBase = "http://www.iheartradio.com/cc-common/iphone/config/";
+//	public static final String			kURLBase = "http://www.balance-software.com/clearchannel/Streamradio/iphone/config/";
+
+	public static String				sConfigFilesDirectory = "production";
+
+	protected boolean                   mCacheData;
+	protected byte[]                    mCachedXML;
+	protected String                    mContents;
+	protected long                      mKeyVersion;
+	protected long                      mKeyXML;
+	protected IHRURLEncoder				mPost;
+	protected String                    mURL;
+	protected String                    mVersion;
+
+	public IHRXML() { super(); }
+
+	public IHRXML( byte[] xml ) throws IOException {
+		super();
+
+		mCachedXML = xml;
+	}
+
+/*
+	public IHRXML( String configurationFile, String version, long keyVersion, long keyXML ) {
+		super();
+
+		String                          storedVersion;
+
+		mPost = IHRConfiguration.shared().standardPostData( false );
+		mURL = kURLBase + sConfigFilesDirectory + configurationFile;
+		mKeyVersion = keyVersion;
+		mKeyXML = keyXML;
+		mVersion = version;
+
+		if ( IHRPlatform.isBeingDebugged() ) {
+			mURL += "?" + mPost.toString();
+			mPost = null;
+		}
+
+		if ( version != null && ( storedVersion = IHRPreferences.getString( keyVersion ) ) != null ) {
+			if ( storedVersion.equals( version ) ) {
+				mCachedXML = IHRPreferences.getBytes( keyXML );
+			}
+		}
+	}
+*/
+	
+	public boolean parseBytes( byte[] inBytes ) {
+		boolean                         result = false;
+		
+		try {
+			mContents = "";
+			
+			IHRPlatform.parseXML( inBytes , this );
+			
+			result = true;
+		} catch ( Exception e ) {}
+		
+		return result;
+	}
+	
+	public void parse() throws IOException {
+		byte[]                          data;
+		boolean                         success;
+		
+		try {
+			if ( mCachedXML != null ) {
+				data = mCachedXML;
+			} else {
+				if ( ( data = IHRHTTP.fetchSynchronous( mURL, mPost ) ) == null ) {
+					throw new IOException( "No XML data received" );
+				}
+
+				if ( mCacheData ) mCachedXML = data;
+			}
+			
+			mContents = "";
+			IHRPlatform.parseXML( data , this );
+
+			if ( mCachedXML == null && mVersion != null ) {
+				IHRPreferences.remove( mKeyVersion );
+				IHRPreferences.setBytes( mKeyXML, data );
+				IHRPreferences.setString( mKeyVersion, mVersion );
+			}
+
+			success = true;
+		} catch ( Exception e ) {
+			success = false;
+		}
+
+		if ( ! mCacheData ) mCachedXML = null;
+		mContents = null;
+
+		if ( ! success ) throw new IOException( "Unable to parse XML" );
+	}
+
+	@Override
+	public void characters( char[] ch, int start, int length ) {
+		mContents += String.valueOf( ch, start, length );
+	}
+	
+	public void startElement( String uri, String localName, String qName, Attributes attributes ) {
+		mContents = "";
+	}
+}

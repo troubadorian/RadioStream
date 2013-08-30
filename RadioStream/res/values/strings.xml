@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">StreamRadio</string>
+    <string name="hello">StreamRadio</string>
+    <string name="lbl_this_station">This Station</string>
+    
+    <string name="ga_account"></string>
+</resources>

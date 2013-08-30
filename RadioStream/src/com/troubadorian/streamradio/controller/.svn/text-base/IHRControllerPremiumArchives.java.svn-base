@@ -1,0 +1,238 @@
+package com.clearchannel.iheartradio.controller;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import android.content.Intent;
+import android.view.ContextMenu;
+import android.view.MenuItem;
+import android.view.View;
+import android.widget.ListView;
+import android.widget.TextView;
+
+import com.clearchannel.iheartradio.android.model.IHRArchiveCursor;
+import com.clearchannel.iheartradio.android.model.IHRConfigurationClient;
+import com.clearchannel.iheartradio.android.model.IHRHashtable;
+import com.clearchannel.iheartradio.android.model.IHRThreadable;
+import com.clearchannel.iheartradio.android.view.IHRListView;
+import com.clearchannel.iheartradio.android.view.IHRViewInfoSeparator;
+import com.clearchannel.iheartradio.model.IHRBroadcaster;
+import com.clearchannel.iheartradio.model.IHRCache;
+import com.clearchannel.iheartradio.model.IHRListener;
+import com.clearchannel.iheartradio.model.IHRPremiumChannel;
+import com.clearchannel.iheartradio.model.IHRPremiumChannels;
+import com.clearchannel.iheartradio.model.IHRPremiumItem;
+
+
+public class IHRControllerPremiumArchives extends IHRControllerHeaderList implements IHRListener {
+	//New code for #1064 (part 1 of 3)
+	//Part 1 in the top of IHRControllerPremiumArchives.java
+	//Part 2 at line 440 in IHRControllerPlayer.java
+	//Part 3 at line 40 in IHRControllerCursorList.java
+	//remember the intents for the following hours in the same day
+	public  static List<Intent> followingIntents =  new ArrayList<Intent>(3);
+
+	Runnable					mUpdate;
+
+	@Override
+	public ListView createListView() {
+		return new IHRArchivesList( activity() );
+	}
+
+	@Override
+	public View createHeaderView() {
+		return inflateLayout( R.layout.premium_header );
+//		return new IHRViewInfoSeparator( activity() );
+	}
+
+	public String site() {
+		String					result = null;
+
+		if ( mCursor instanceof IHRArchiveCursor ) {
+			result = ((IHRArchiveCursor)mCursor).mChannel.getSite();
+		}
+
+		return result;
+	}
+
+	@Override
+	public void onNewIntent( Intent intent ) {
+		String					site = intent.getStringExtra( "site" );
+
+		if ( null == site ) {
+			super.onNewIntent( intent );
+		} else {
+			IHRConfigurationClient.shared().refreshPremium( site );
+
+			setListCursor( new IHRArchiveCursor( site ) );
+		}
+	}
+
+	@Override
+	public void onDestroy() {
+		beingShown( false );
+	}
+
+	public void updateHeader() {
+		if ( mCursor instanceof IHRArchiveCursor && null != IHRThreadable.gMain ) {
+			IHRPremiumChannel	channel = ((IHRArchiveCursor)mCursor).mChannel;
+			TextView			text;
+
+			if ( mHeader instanceof IHRViewInfoSeparator ) {
+				text = ((IHRViewInfoSeparator)mHeader).mLeft;
+				if ( null != text ) text.setText( channel.getName() );
+
+				text = ((IHRViewInfoSeparator)mHeader).mRight;
+				if ( null != text ) text.setText( channel.availableText() );
+			} else {
+				text = (TextView)mHeader.findViewById( R.id.HeaderTextTitle );
+				if ( null != text ) text.setText( channel.getName() );
+
+				text = (TextView)mHeader.findViewById( R.id.HeaderTextAvailable );
+				if ( null != text ) text.setText( channel.availableText() );
+			}
+
+			if ( null == mUpdate ) mUpdate = new Runnable() { public void run() { updateHeader(); } };
+
+			IHRThreadable.gMain.handle( mUpdate , 10*1000 );
+		}
+	}
+
+	@Override
+	public void beingShown( boolean inShown ) {
+		IHRBroadcaster			common = IHRBroadcaster.common();
+
+		if ( inShown ) {
+			String				site = site();
+			String				name = ( null == site ) ? null : IHRPremiumChannels.kNotifyPrefixPremium + site;
+
+			if ( null != name ) common.listenFor( name , this );
+
+			common.listenFor( IHRCache.kNotifyNameDownload , this );
+			common.listenFor( IHRCache.kNotifyNameData , this );
+
+			updateHeader();
+		} else {
+			common.removeFor( null , this );
+
+			if ( null != mUpdate && null != IHRThreadable.gMain ) {
+				IHRThreadable.gMain.remove( mUpdate );
+			}
+		}
+
+		super.beingShown( inShown );
+	}
+
+	public void listen( String inName , IHRHashtable inDetails ) {
+		String					site = site();
+		String					name = ( null == site ) ? null : IHRPremiumChannels.kNotifyPrefixPremium + site;
+
+		//	premium site rss has changed
+		if ( inName.equals( name ) || inName.equals( "endingOfflineMode" ) ) {
+			mCursor.requery();
+		}
+
+		//	individual archive is downloading
+		if ( inName.equals( IHRCache.kNotifyNameData ) || inName.equals( IHRCache.kNotifyNameDownload ) ) {
+			String				url = inDetails.stringValue( "url" , null );
+			View				row = ( null == url ) ? null : mList.findViewWithTag( url );
+
+			if ( null != row ) {
+				if ( inDetails.booleanValue( "delete" , false ) || inDetails.booleanValue( "cancel" , false ) ) {
+					IHRArchiveCursor.applyProgressToRow( 0 , 0 , false , row );
+				} else if ( inDetails.booleanValue( "finish" , false ) ) {
+					//	assume already got 100% progress
+				} else {
+					IHRArchiveCursor.applyProgressToRow( inDetails , row );
+				}
+			}
+		}
+	}
+
+	public class IHRArchivesList extends IHRListView {
+
+		public IHRArchivesList( IHRControllerActivity inContext ) {
+			super( inContext );
+		}
+
+		@Override
+		public void addContextMenuItems( ContextMenu ioMenu , int inPosition , long inID , View inTarget ) {
+			IHRConfigurationClient	client = IHRConfigurationClient.shared();
+			IHRArchiveCursor	cursor = (IHRArchiveCursor)mCursor;
+			IHRPremiumItem		show = cursor.premiumItemForPosition( inPosition );
+			IHRHashtable		progress = ( null == show ) ? null : client.progressForURL( show.getLink() );
+			String				site = cursor.mChannel.getSite();
+
+			MenuItem			item;
+			int					size = ioMenu.size();
+			int					offset = ( null == progress ) ? 0 : progress.integerValue( "offset" , 0 );
+			int					length = ( null == progress ) ? 0 : progress.integerValue( "length" , 0 );
+			boolean				paused = ( null == progress ) ? false : progress.booleanValue( "paused" , false );
+
+			if ( null != show || inPosition == 0) {
+				//inPosition == 0  live podcast
+				//1333 There is no listen option for live podcast on hold touch menu (see item 1332)
+				item = ioMenu.add( "Listen to Show" );
+				item.setIcon( android.R.drawable.ic_media_play );
+				Intent intent = new Intent().putExtra( "action" , "listen"  );
+				//intent.putExtra( "site" , site );
+				//intent.putStringArrayListExtra( "archive" , show );
+
+				//TODO see IHRControllerCursorList for preparing the Intents and IHRStationsCursor.prepareIntent
+				cursor.prepareIntent(intent, inPosition);
+				intent.putExtra( "class" , IHRControllerPlayer.class.getName() );
+
+				item.setIntent(intent);
+			}
+			
+			if ( null != show ) {
+
+				//to hold the intent for the following hours in the same day
+				//After the above podcast played, then play the following podcast
+				IHRControllerPremiumArchives.followingIntents.clear();
+				IHRPremiumItem	pItem;
+				for(int i =inPosition+1; ; i++){
+					//return null if not found
+					pItem = cursor.premiumItemForPosition( i );
+					Intent intentChild; 
+					if(pItem== null){
+						break;
+					}
+					intentChild = new Intent();
+					//mCursor.prepareIntent( intentChild , position );
+					mCursor.prepareIntent( intentChild , i );
+					IHRControllerPremiumArchives.followingIntents.add(intentChild);
+				}
+				
+				//1332 attempting to download live podcast crashes app. (Can we please change this code so it will no give the option to download the podcast and instead it will give the option  to listen to it? This should resolve 1333 and 1332 in one go.)
+				//Attempting to download live podcasts crashes application.
+
+				//only available: null != show
+				if (paused || 0 == length ) {
+					item = ioMenu.add( paused ? "Resume Download" : "Download" );
+					item.setIcon( android.R.drawable.stat_sys_download );
+					item.setIntent( new Intent().putExtra( "action" , "acquire" ).putExtra( "site" , site ).putStringArrayListExtra( "archive" , show ) );
+				}
+
+				if ( !paused && offset < length ) {
+					item = ioMenu.add( "Pause Download" );
+					item.setIcon( android.R.drawable.ic_media_pause );
+					item.setIntent( new Intent().putExtra( "action" , "suspend" ).putExtra( "site" , site ).putStringArrayListExtra( "archive" , show ) );
+				}
+
+				if ( length > 0 ) {
+					item = ioMenu.add( "Delete Archive" );
+					item.setIcon( android.R.drawable.ic_delete );
+					item.setIntent( new Intent().putExtra( "action" , "uncache" ).putExtra( "site" , site ).putStringArrayListExtra( "archive" , show ) );
+				}
+			}
+
+
+			if ( ioMenu.size() > size ) {
+				item = ioMenu.add( "Cancel" );
+				item.setIcon( android.R.drawable.ic_menu_close_clear_cancel );
+				item.setIntent( new Intent().putExtra( "action" , "cancel" ) );
+			}
+		}
+	}
+}

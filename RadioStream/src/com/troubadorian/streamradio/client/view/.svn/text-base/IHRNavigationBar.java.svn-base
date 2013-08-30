@@ -1,0 +1,173 @@
+package com.clearchannel.iheartradio.android.view;
+
+import android.content.Context;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.text.TextUtils;
+import android.util.AttributeSet;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.AbsoluteLayout;
+import android.widget.ImageView;
+import android.widget.TextView;
+
+import com.clearchannel.iheartradio.controller.R;
+
+@SuppressWarnings( "deprecation" )
+public class IHRNavigationBar extends AbsoluteLayout {
+	public ImageView				mBackground;
+	public IHRNavigationButton		mButtonLeft;
+	public IHRNavigationButton		mButtonRight;
+	public TextView					mTitle;
+
+	final int						kButtonHeight = 30;
+	final int						kButtonOffsetX = 4;
+	final int						kButtonOffsetY = 7;
+	final int						kTitleHeight = 22;
+	final int						kTitleOffsetY = 10;
+
+	public IHRNavigationBar(Context context) {
+		super( context );
+		init( context, null, 0 );
+	}
+
+	public IHRNavigationBar(Context context, AttributeSet attrs) {
+		super(context, attrs);
+		init( context, attrs, 0 );
+	}
+
+	public IHRNavigationBar(Context context, AttributeSet attrs, int defStyle) {
+		super(context, attrs, defStyle);
+		init( context, attrs, defStyle );
+	}
+
+	private void init( Context context, AttributeSet attrs, int defStyle) {
+		mBackground = new ImageView( context );
+		
+		mBackground.setImageResource( R.drawable.nav_background_1px_top );
+		mBackground.setLayoutParams( new LayoutParams( LayoutParams.FILL_PARENT, 45, 0, 0 ) );
+		mBackground.setScaleType( ImageView.ScaleType.FIT_XY );
+		
+		addView( mBackground );
+		addView( mButtonLeft = new IHRNavigationButton( context, true ) );
+		addView( mButtonRight = new IHRNavigationButton( context, false ) );
+
+		mTitle = new TextView( context );
+		
+		mTitle.setEllipsize( TextUtils.TruncateAt.END );  
+		mTitle.setGravity( Gravity.CENTER );
+		mTitle.setSingleLine();
+		mTitle.setTextColor( Color.WHITE );
+		mTitle.setTextSize( 16 );
+		mTitle.setTypeface( Typeface.SANS_SERIF, Typeface.BOLD );
+		mTitle.setVisibility( View.INVISIBLE );
+		
+		addView( mTitle );
+	}
+
+	@Override
+	protected void onMeasure( int widthMeasureSpec, int heightMeasureSpec ) {
+		int							leftButtonWidth, rightButtonWidth, textWidth, width;
+		
+		width = MeasureSpec.getSize( widthMeasureSpec );
+		
+		if ( mButtonLeft.getVisibility() == View.GONE ) {
+			leftButtonWidth = 0;
+		} else {
+			leftButtonWidth = mButtonLeft.getSuggestedMinimumWidth();
+
+			mButtonLeft.measure( MeasureSpec.makeMeasureSpec( leftButtonWidth, MeasureSpec.EXACTLY ), MeasureSpec.makeMeasureSpec( kButtonHeight, MeasureSpec.EXACTLY ) );			
+			
+			leftButtonWidth += kButtonOffsetX;
+		}
+		
+		if ( mButtonRight.getVisibility() == View.GONE ) {
+			rightButtonWidth = 0;
+		} else {
+			rightButtonWidth = mButtonRight.getSuggestedMinimumWidth(); 
+			
+			mButtonRight.measure( MeasureSpec.makeMeasureSpec( rightButtonWidth, MeasureSpec.EXACTLY ), MeasureSpec.makeMeasureSpec( kButtonHeight, MeasureSpec.EXACTLY ) );
+			
+			rightButtonWidth += kButtonOffsetX;
+		}
+
+		leftButtonWidth += kButtonOffsetX;
+		rightButtonWidth += kButtonOffsetX;
+		
+		width -= leftButtonWidth + rightButtonWidth;
+		textWidth = (int) Math.ceil( mTitle.getPaint().measureText( mTitle.getText(), 0, mTitle.getText().length() ) );
+		
+		if ( textWidth > width ) textWidth = width;
+		
+		// This tells the title view its maximum width.  The title view may actually render smaller depending on text content.
+		mTitle.setWidth( textWidth );
+		mTitle.measure( MeasureSpec.makeMeasureSpec( textWidth, MeasureSpec.EXACTLY ), MeasureSpec.makeMeasureSpec( kTitleHeight, MeasureSpec.EXACTLY ) );
+		
+		super.onMeasure( widthMeasureSpec, heightMeasureSpec );
+	}
+
+	@Override
+	protected void onLayout( boolean changed, int left, int top, int right, int bottom ) {
+		int							leftButtonWidth, maxTitleWidth, offsetX, rightButtonWidth, titleWidth, width;
+		
+		super.onLayout( changed, left, top, right, bottom );
+		
+		width = getWidth();
+		
+		if ( mButtonLeft.getVisibility() == View.GONE ) {
+			leftButtonWidth = 0;
+		} else {
+			leftButtonWidth = kButtonOffsetX + mButtonLeft.getMeasuredWidth();
+			
+			mButtonLeft.layout( kButtonOffsetX, kButtonOffsetY, leftButtonWidth, kButtonOffsetY + kButtonHeight );
+		}
+		
+		if ( mButtonRight.getVisibility() == View.GONE ) {
+			rightButtonWidth = 0;
+		} else {
+			rightButtonWidth = mButtonRight.getMeasuredWidth(); 
+			offsetX = width - kButtonOffsetX - rightButtonWidth;
+			
+			mButtonRight.layout( offsetX, kButtonOffsetY, offsetX + rightButtonWidth, kButtonOffsetY + kButtonHeight );
+			
+			rightButtonWidth += kButtonOffsetX;
+		}
+		
+		leftButtonWidth += kButtonOffsetX;
+		rightButtonWidth += kButtonOffsetX;
+		
+		titleWidth = mTitle.getMeasuredWidth();
+		maxTitleWidth = width - ( leftButtonWidth + rightButtonWidth );
+		
+		if ( titleWidth > maxTitleWidth ) {
+			titleWidth = maxTitleWidth;
+		} else if ( titleWidth < maxTitleWidth ) {
+			// try to center title in view
+			
+			leftButtonWidth = width / 2 - titleWidth / 2;		// where we'd place if we want to center
+			leftButtonWidth += titleWidth;						// right edge
+			width -= rightButtonWidth;							// store into width the offset of the right button area (might be just a margin)
+			
+			if ( leftButtonWidth > width ) {
+				leftButtonWidth -= leftButtonWidth - width;		// pull title left as necessary
+			}
+			
+			leftButtonWidth -= titleWidth;
+		}
+		
+		mTitle.layout( leftButtonWidth, kTitleOffsetY, leftButtonWidth + titleWidth, kTitleOffsetY + kTitleHeight );
+	}
+	
+	public void setLeftButtonText( String inTextLine1, String inTextLine2 ) {
+		mButtonLeft.setText( inTextLine1, inTextLine2 );
+	}
+
+	public void setRightButtonText( String inTextLine1, String inTextLine2 ) {
+		mButtonRight.setText( inTextLine1, inTextLine2 );
+	}
+	
+	public void setTitle( String inText ) {
+		mTitle.setText( inText );
+		mTitle.setVisibility( View.VISIBLE );
+	}
+}

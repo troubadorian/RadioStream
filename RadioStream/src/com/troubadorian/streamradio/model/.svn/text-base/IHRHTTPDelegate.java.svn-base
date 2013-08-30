@@ -1,0 +1,5 @@
+package com.clearchannel.iheartradio.model;
+
+public interface IHRHTTPDelegate {
+	void httpFetchComplete( IHRHTTP http );
+}

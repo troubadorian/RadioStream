@@ -1,0 +1,35 @@
+K 25
+svn:wc:ra_dav:version-url
+V 148
+/svn/clearchannel/!svn/ver/1350/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/services
+END
+IHRServicePlayer.java
+K 25
+svn:wc:ra_dav:version-url
+V 170
+/svn/clearchannel/!svn/ver/1347/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/services/IHRServicePlayer.java
+END
+IHRService.java
+K 25
+svn:wc:ra_dav:version-url
+V 164
+/svn/clearchannel/!svn/ver/1323/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/services/IHRService.java
+END
+IHRConfigurationFile.java
+K 25
+svn:wc:ra_dav:version-url
+V 174
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/services/IHRConfigurationFile.java
+END
+IHRServiceConfiguration.java
+K 25
+svn:wc:ra_dav:version-url
+V 177
+/svn/clearchannel/!svn/ver/1350/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/services/IHRServiceConfiguration.java
+END
+IHRConfigurationStartup.java
+K 25
+svn:wc:ra_dav:version-url
+V 177
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/services/IHRConfigurationStartup.java
+END

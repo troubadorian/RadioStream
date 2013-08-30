@@ -1,0 +1,162 @@
+package com.troubadorian.streamradio.client.model;
+
+import java.util.Calendar;
+import java.util.GregorianCalendar;
+import java.util.List;
+import java.util.TimeZone;
+
+import android.content.Context;
+import android.content.Intent;
+import android.database.Cursor;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.text.TextUtils;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ImageView;
+import android.widget.RelativeLayout;
+import android.widget.SimpleCursorAdapter;
+import android.widget.TextView;
+
+import com.troubadorian.streamradio.client.view.IHRViewInfoSeparator;
+import com.troubadorian.streamradio.controller.IHRControllerCities;
+import com.troubadorian.streamradio.controller.IHRControllerPremiumChannels;
+import com.troubadorian.streamradio.controller.R;
+
+
+public class IHRPrimaryCursor extends IHRStationsCursor {
+	String[]					mFixed = { "Local Stations" , "All Cities" , "Formats" , "Personalities" , "Premium", "" /* separator */ };
+	
+	@Override
+	public void setContents( List inFeatured ) {
+		mContents = inFeatured;
+		mCursorCount = mFixed.length;
+		
+		if ( null != inFeatured ) mCursorCount += inFeatured.size();
+	}
+	
+	@Override
+	public void prepareIntent( Intent intent , int index ) {
+		if ( index >= 0 && index < mCursorCount ) {
+			switch ( index ) {
+			case 0: intent.putExtra( "source" , "local" ); break;
+			case 1: intent.putExtra( "source" , "cities" ).putExtra( "class" , IHRControllerCities.class.getName() ); break;
+			case 2: intent.putExtra( "source" , "formats" ); break;
+			case 3: intent.putExtra( "source" , "format" ).putExtra( "name" , mFixed[3] );  break;
+			case 4: intent.putExtra( "source" , "channels" ).putExtra( "class" , IHRControllerPremiumChannels.class.getName() );; break;
+//			case 4: intent.putExtra( "source" , "favorites" ).putExtra( "class" , IHRControllerFavorites.class.getName() ); break;
+			case 5: break;		// separator
+			default: super.prepareIntent( intent , mCursorIndex - mFixed.length ); break;
+			}
+		}
+	}
+	
+	@Override
+	public String getString( int arg0 ) {
+		String					result = null;
+		
+		if ( mCursorIndex < 0 ) {
+			
+		} else if ( mCursorIndex < mFixed.length ) {
+			result = ( arg0 == 0 ) ? mFixed[mCursorIndex] : null;
+		} else if ( mCursorIndex < mCursorCount ) {
+			return getStringForIndex( arg0 , mCursorIndex - mFixed.length );
+		}
+		
+		return result;
+	}
+
+	@Override
+	public SimpleCursorAdapter newAdapter( Context inContext ) {
+		return new IHRPrimaryCursorAdapter( inContext , kResourceID , this , kColumns , kColumnsID );
+	}
+	
+	protected class IHRPrimaryCursorAdapter extends SimpleCursorAdapter {
+		public IHRPrimaryCursorAdapter( Context context, int layout, Cursor cursor, String[] from, int[] to ) {
+			super( context, layout, cursor, from, to );
+		}
+		
+		@Override
+		public boolean areAllItemsEnabled() { return false; }
+		@Override
+		public boolean isEnabled( int position ) { return position != 5; }
+		
+		@Override
+		public View getView( int position, View convertView, ViewGroup parent ) {
+			int						d, m, y;
+			String					format;
+			Calendar				now;
+			IHRViewInfoSeparator	separator;
+			View					view;
+			
+			if ( position < 5 ) {
+				view = new SingleLineRow( parent.getContext() );
+				((SingleLineRow) view).mText.setText( mFixed[ position ] );
+			} else if ( position == 5 ) {
+				view = separator = new IHRViewInfoSeparator( parent.getContext() );
+				
+				separator.mLeft.setText( "Featured" );
+				
+				now = new GregorianCalendar( TimeZone.getDefault() );
+				
+				d = now.get( Calendar.DAY_OF_MONTH );
+				m = now.get( Calendar.MONTH ) + 1;
+				y = now.get( Calendar.YEAR ) % 100;
+
+				format = "";
+				format += m > 9 ? m : ( "0" + m );
+				format += "." + ( d > 9 ? d : ( "0" + d ) );
+				format += "." + ( y > 9 ? y : ( "0" + y ) );
+				
+				separator.mRight.setText( format );
+			} else {
+				view = super.getView( position, null, parent );
+			}
+			
+			return view;
+		}
+	}
+}
+
+final class SingleLineRow extends RelativeLayout {
+	public ImageView			mChevron;
+	public TextView				mText;
+	
+	public SingleLineRow( Context context ) {
+		super( context );
+		
+		addView( mChevron = new ImageView( context ) );
+		addView( mText = new TextView( context ) );
+		
+		mChevron.setImageResource( R.drawable.chevron );
+		
+		mText.setEllipsize( TextUtils.TruncateAt.END );
+		mText.setSingleLine();
+		mText.setTextColor( Color.WHITE );
+		mText.setTextSize( 20.0f );
+		mText.setTypeface( Typeface.SANS_SERIF, Typeface.NORMAL );
+	}
+	
+	@Override
+	protected void onMeasure( int widthMeasureSpec, int heightMeasureSpec ) {
+		super.onMeasure( widthMeasureSpec, View.MeasureSpec.makeMeasureSpec( 36, View.MeasureSpec.EXACTLY ) );
+	}
+	
+	@Override
+	protected void onLayout( boolean changed, int l, int t, int r, int b ) {
+		int						h, w, x, y;
+		
+		h = b - t;
+		w = r - l;
+		
+		x = w - 8 - 10;
+		y = ( h - 13 ) / 2;
+		
+		mChevron.layout( x, y, x + 10, y + 13 );
+		
+		x -= 8;
+		y = ( h - mText.getMeasuredHeight() ) / 2;
+		
+		mText.layout( 2, y, x, y + mText.getMeasuredHeight() );
+	}
+}

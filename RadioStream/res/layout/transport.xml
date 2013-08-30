@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	android:background="@drawable/transport_background"
+	android:layout_centerHorizontal="true"
+	android:layout_width="wrap_content"
+	android:layout_height="wrap_content">
+	
+	<SeekBar
+		android:id="@+id/ControlsSeekBar"
+		android:layout_centerHorizontal="true"
+		android:layout_height="wrap_content"
+		android:layout_width="fill_parent"
+		android:layout_marginTop="40px"
+		android:layout_marginLeft="60px"
+		android:layout_marginRight="60px"
+	/>
+	
+	<TextView
+		android:id="@+id/ControlsCurrent"
+		android:layout_height="wrap_content"
+		android:layout_width="40px"
+		android:layout_marginLeft="10px"
+		android:layout_alignBottom="@id/ControlsSeekBar"
+		
+		android:text='00:00 '
+		android:gravity="right"
+		android:ellipsize="end"
+		android:maxLines='1'
+		android:textColor="#ffffffff"
+		android:textSize="12px"
+		android:typeface="sans"
+	/>
+	
+	<TextView
+		android:id="@+id/ControlsRemains"
+		android:layout_alignParentRight="true"
+		android:layout_height="wrap_content"
+		android:layout_width="40px"
+		android:layout_marginRight="10px"
+		android:layout_alignBottom="@id/ControlsSeekBar"
+		
+		android:text='-00:00'
+		android:gravity="left"
+		android:ellipsize="end"
+		android:maxLines='1'
+		android:textColor="#ffffffff"
+		android:textSize="12px"
+		android:typeface="sans"
+	/>
+	
+	<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+		android:layout_centerHorizontal="true"
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:layout_below='@id/ControlsSeekBar'>
+		
+		<ImageView
+			android:id='@+id/ControlsReverse'
+			android:src='@drawable/transport_reverse'
+			
+			android:layout_margin='5px'
+			android:layout_width='wrap_content'
+			android:layout_height='wrap_content'
+		/>
+		
+		<ImageView
+			android:id='@+id/ControlsPlaying'
+			android:src='@drawable/transport_play'
+			android:layout_margin='5px'
+			
+			android:layout_toRightOf='@id/ControlsReverse'
+			android:layout_height='wrap_content'
+			android:layout_width='wrap_content'
+		/>
+		
+		<ImageView
+			android:id='@+id/ControlsAdvance'
+			android:src='@drawable/transport_advance'
+			android:layout_margin='5px'
+			
+			android:layout_toRightOf='@id/ControlsPlaying'
+			android:layout_height='wrap_content'
+			android:layout_width='wrap_content'
+		/>
+		
+		<ImageView
+			android:id='@+id/ControlsRestart'
+			android:src='@drawable/transport_restart'
+			android:layout_margin='5px'
+			
+			android:layout_toRightOf='@id/ControlsAdvance'
+			android:layout_height='wrap_content'
+			android:layout_width='wrap_content'
+		/>
+	</RelativeLayout>
+	
+</RelativeLayout>

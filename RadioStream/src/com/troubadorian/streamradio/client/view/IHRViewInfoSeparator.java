@@ -1,0 +1,67 @@
+package com.troubadorian.streamradio.client.view;
+
+import android.content.Context;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.text.TextUtils;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.RelativeLayout;
+import android.widget.TextView;
+
+import com.troubadorian.streamradio.controller.R;
+
+public class IHRViewInfoSeparator extends RelativeLayout {
+	public TextView						mLeft;
+	public TextView						mRight;
+	
+	public IHRViewInfoSeparator( Context context ) {
+		super( context );
+		
+		setWillNotDraw( false );
+		
+		addView( mLeft = new TextView( context ) );
+		addView( mRight = new TextView( context ) );
+	
+		mLeft.setEllipsize( TextUtils.TruncateAt.END );
+		mLeft.setGravity( Gravity.LEFT );
+		mLeft.setSingleLine();
+		mLeft.setTextColor( Color.WHITE );
+		mLeft.setTextSize( 12.0f );
+		mLeft.setTypeface( Typeface.SANS_SERIF, Typeface.BOLD );
+		
+		mRight.setEllipsize( TextUtils.TruncateAt.END );
+		mRight.setGravity( Gravity.RIGHT );
+		mRight.setSingleLine();
+		mRight.setTextColor( Color.WHITE );
+		mRight.setTextSize( 12.0f );
+		mRight.setTypeface( Typeface.SANS_SERIF, Typeface.NORMAL );
+		
+		this.setBackgroundResource( R.drawable.grey_table_header_1px );
+	}
+	
+	@Override
+	protected void onLayout( boolean changed, int l, int t, int r, int b ) {
+		int						h, w, x, y;
+		
+		w = r - l;
+		
+		x = w - 2 - 8 - 4;				// left, middle, and right margins
+		x = (int)(x * 0.75f);			// 75% of the available space is used by left text for the station name, right text for "Buffering..."
+		
+		h = mLeft.getMeasuredHeight();
+		y = ( getHeight() - h ) / 2 - 1;
+		
+		mLeft.layout( 2, y, x += 2, y + h );
+		
+		h = mRight.getMeasuredHeight();
+		y = ( getHeight() - h ) / 2 - 1;
+		
+		mRight.layout( x + 8, y, w - 4, y + h );
+	}
+	
+	@Override
+	protected void onMeasure( int widthMeasureSpec, int heightMeasureSpec ) {
+		super.onMeasure( widthMeasureSpec, View.MeasureSpec.makeMeasureSpec( 21, View.MeasureSpec.EXACTLY ) );
+	}
+}

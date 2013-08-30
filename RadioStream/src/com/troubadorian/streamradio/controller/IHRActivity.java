@@ -1,0 +1,374 @@
+package com.troubadorian.streamradio.controller;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.media.AudioManager;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.net.Uri;
+import android.os.Bundle;
+import android.view.KeyEvent;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.view.View;
+import android.view.WindowManager;
+
+import com.troubadorian.streamradio.client.model.IHRConfigurationClient;
+import com.troubadorian.streamradio.client.model.IHRHashtable;
+import com.troubadorian.streamradio.client.model.IHRPlatform;
+import com.troubadorian.streamradio.client.model.IHRPlayerClient;
+import com.troubadorian.streamradio.client.services.IHRService;
+import com.troubadorian.streamradio.client.view.IHRViewMain;
+import com.troubadorian.streamradio.model.IHRBroadcaster;
+import com.troubadorian.streamradio.model.IHRHTTP;
+import com.troubadorian.streamradio.model.IHRHTTPDelegate;
+import com.troubadorian.streamradio.model.IHRListener;
+import com.troubadorian.streamradio.model.IHRStation;
+
+public class IHRActivity extends IHRControllerActivity implements IHRHTTPDelegate, IHRListener {
+	String							mCurrentStationCallLetters;
+	Bitmap							mCurrentStationLogo;
+	IHRViewMain						mMainView;
+	boolean							mShowMain;
+	boolean							mOffline;
+
+	public static final String		kActionReceivedStationLogo	= "com.troubadorian.streamradio.client.IHRActivity.receivedStationLogo";
+
+	public synchronized Bitmap getCurrentStationLogo() { return mCurrentStationLogo; }
+
+	public synchronized void httpFetchComplete( IHRHTTP http ) {
+		byte[]					data;
+
+		if ( ! ((String) http.getContext()).equals( mCurrentStationCallLetters ) ) return;
+
+		try {
+			data = http.getData();
+			mCurrentStationLogo = BitmapFactory.decodeByteArray( data, 0, data.length );
+
+			sendBroadcast( new Intent( kActionReceivedStationLogo ) );
+		} catch ( Exception e ) { }
+	}
+
+	public Intent pushing( String inClass ) {
+		return pushing( inClass , Intent.FLAG_ACTIVITY_CLEAR_TOP );
+	}
+
+	public void pushSplash() {
+		pushControllerForResult( pushing( IHRControllerSplash.class.getName() ) , 1 );
+	}
+
+	public void pushSettings() {
+		pushControllerIntent( pushing( IHRControllerSettings.class.getName() , Intent.FLAG_ACTIVITY_NEW_TASK ) );
+	}
+
+	public void pushRandomizer() {
+		pushControllerIntent( pushing( IHRControllerRandomizer.class.getName() , Intent.FLAG_ACTIVITY_NEW_TASK ) );
+	}
+
+	public void pushPlayer( String inLetters ) {
+		pushControllerIntent( pushing( IHRControllerPlayer.class.getName() , Intent.FLAG_ACTIVITY_REORDER_TO_FRONT ).putExtra( "station" , inLetters ) );
+	}
+
+	public void pushTagged() {
+		pushControllerIntent( pushing( IHRControllerTagged.class.getName() , Intent.FLAG_ACTIVITY_NEW_TASK ).putExtra( "source" , "tagged" ) );
+
+//		openWebURL( "http://www.google.com" );
+	}
+
+	public void pushCitiesList() {
+		pushControllerIntent( pushing( IHRControllerCities.class.getName() , Intent.FLAG_ACTIVITY_NEW_TASK ).putExtra( "source" , "city" ) );
+	}
+
+	public void pushFavoritesList(boolean tabBarPushed) {
+		//if current song is favourited, default to song tab on favourites screen
+		boolean tagged = false;
+		IHRHashtable metadata = IHRPlayerClient.shared().getMetadata();
+		if (null != metadata && tabBarPushed) {
+			String artist = (String) metadata.get( "artist" );
+			String track = (String) metadata.get( "track" );
+			if (null != artist && null != track && !artist.equals("") && !track.equals("")) {
+				if (IHRConfigurationClient.shared().isSongTagged(artist, track)) tagged = true;
+			}
+		}
+		if (tagged) {
+			pushControllerIntent( pushing( IHRControllerTagged.class.getName() , Intent.FLAG_ACTIVITY_NEW_TASK ).putExtra( "source" , "tagged" ) );
+		} else {
+			pushControllerIntent( pushing( IHRControllerFavorites.class.getName() , Intent.FLAG_ACTIVITY_NEW_TASK ).putExtra( "source" , "favorites" ) );
+		}
+	}
+
+	public void pushPrimaryList( boolean inLeaveStack ) {
+		pushControllerIntent( pushing( IHRControllerCursorList.class.getName() , Intent.FLAG_ACTIVITY_NEW_TASK ).putExtra( "source" , "primary" ).putExtra( kKeyOrder , inLeaveStack ? 0 : -1 ) );
+	}
+
+	public void pushPremiumList( boolean inOffline ) {
+		pushControllerIntent( pushing( IHRControllerPremiumChannels.class.getName() , inOffline ? Intent.FLAG_ACTIVITY_NEW_TASK : Intent.FLAG_ACTIVITY_CLEAR_TOP ).putExtra( "source" , "channels" ) );
+	}
+
+	public void pushWebURL( String inURL ) {
+		pushControllerIntent( pushing( IHRControllerWeb.class.getName() , 0 ).putExtra( "url" , inURL ) );
+	}
+
+	public void openWebURL( String inURL ) {
+		Intent browse = new Intent( Intent.ACTION_VIEW , Uri.parse( inURL ) );
+//		Intent search = new Intent( Intent.ACTION_WEB_SEARCH ).putExtra( SearchManager.QUERY , inURL );
+
+		this.startActivity( browse );
+	}
+
+	public void showPrimaryController() {
+		if ( IHRPlayerClient.shared().isPlaying() ) {
+			pushPlayer( "" );
+		} else if ( null == topController()/* not restored */ ) {
+			if ( IHRConfigurationClient.shared().isOffline() ) {
+				IHRBroadcaster.common().listenFor( "endingOfflineMode" , this );
+				mMainView.setOffline( true );
+				pushPremiumList( true );
+			} else {
+				pushPrimaryList( false );
+			}
+		}
+	}
+
+	public void listen( String inName , IHRHashtable inDetails ) {
+		if ( inName.equals( "endingOfflineMode" ) ) {
+			IHRBroadcaster.common().removeFor( "endingOfflineMode" , this );
+			mMainView.setOffline( false );
+			pushPrimaryList( true );
+		}
+	}
+
+	public boolean hasConnectivity() {
+		ConnectivityManager		connectivity = (ConnectivityManager)getSystemService( Context.CONNECTIVITY_SERVICE );
+		NetworkInfo				network = connectivity.getActiveNetworkInfo();
+
+		return network == null ? false : network.isConnectedOrConnecting();
+	}
+
+	@Override
+	protected void onCreate( Bundle inState ) {
+		super.onCreate( inState );
+		setResult( Activity.RESULT_FIRST_USER );
+
+		//	volume keys control audio stream even when audio not playing
+		setVolumeControlStream( AudioManager.STREAM_MUSIC );
+
+
+		if ( IHRConfigurationClient.shared().needsLoad() ) pushSplash();
+		else showPrimaryController();
+	}
+
+	@Override
+	protected void onDestroy() {
+		super.onDestroy();
+		try {
+		} catch (Exception e) {}
+	}
+
+	@Override
+	public boolean onCreateOptionsMenu( Menu menu ) {
+		menu.add( 0, 'q', 0, "Quit" ).setIcon( android.R.drawable.ic_menu_close_clear_cancel );
+
+		if ( IHRPlatform.isBeingDebugged() ) {
+//			menu.add( 0, 'S', 0, "Sleep" ).setIcon( android.R.drawable.ic_lock_power_off );
+//			menu.add( 0, 'D', 0, "Debug" ).setIcon( android.R.drawable.ic_menu_mylocation );
+
+			menu.add( 0, 'p', 0, "Play" ).setIcon( android.R.drawable.ic_media_play );
+			menu.add( 0, 's', 0, "Stop" ).setIcon( android.R.drawable.ic_media_pause );
+			menu.add( 0, 'x', 0, "Exit" ).setIcon( android.R.drawable.ic_delete );
+		}
+		return true;
+	}
+
+	@Override
+	public boolean onOptionsItemSelected( MenuItem item ) {
+		switch ( item.getItemId() ) {
+			case 'q': {
+				//	TODO: bug reported that player does not always stop - fixed with quit?
+				IHRPlayerClient.shared().stop();
+				IHRPlayerClient.shared().serviceTell( IHRService.kQuit );
+				onNoController( false );
+			} break;
+
+			case 'p': IHRPlayerClient.shared().play(); break;
+			case 's': IHRPlayerClient.shared().stop(); break;
+			case 'x': onNoController( false ); break;
+
+//			case 'D': break;
+//			case 'S': try { ((PowerManager)getSystemService( POWER_SERVICE )).goToSleep( SystemClock.uptimeMillis() ); } catch ( Exception e ) { Log.d( "sleep" , e.toString() ); } break;
+		}
+
+		return true;
+	}
+
+	@Override
+	public boolean onContextItemSelected( MenuItem item ) {
+		String					action, artist, letters, track;
+		Intent					intent;
+
+		intent = item.getIntent();
+		action = intent.getStringExtra( "action" );
+
+		if ( null == action ) {
+
+		} else if ( action.equals( "delete" ) ) {
+			if ( ( letters = intent.getStringExtra( "callLetters" ) ) != null ) {
+				IHRConfigurationClient.shared().removeFavorite( letters );
+				pushFavoritesList(false);
+			} else {
+				artist = intent.getStringExtra( "artist" );
+				track = intent.getStringExtra( "track" );
+
+				IHRConfigurationClient.shared().removeTaggedSong( artist, track );
+				pushTagged();
+			}
+		} else if ( action.equals( "disable" ) ) {
+			IHRConfigurationClient.shared().removeAutoplayStation();
+			pushFavoritesList(false);
+		} else if ( action.equals( "enable" ) ) {
+			IHRConfigurationClient.shared().setAutoplayStation( intent.getStringExtra( "callLetters" ) );
+			pushFavoritesList(false);
+		} else if ( action.equals( "play" ) ) {
+			pushPlayer( intent.getStringExtra( "callLetters" ) );
+		} else if ( action.equals( "listen" ) ) {
+			//#1335 Listening to podcast from touch hold menu does not bring user to now playing screen
+			pushControllerIntent( intent );
+			//IHRConfigurationClient.shared().playPremiumItem( intent.getStringArrayListExtra( "archive" ) , intent.getStringExtra( "site" ) );
+		} else if ( action.equals( "suspend" ) ) {
+			IHRConfigurationClient.shared().cachePremiumItem( intent.getStringArrayListExtra( "archive" ) , true , intent.getStringExtra( "site" ) );
+		} else if ( action.equals( "acquire" ) ) {
+			IHRConfigurationClient.shared().cachePremiumItem( intent.getStringArrayListExtra( "archive" ) , false , intent.getStringExtra( "site" ) );
+		} else if ( action.equals( "uncache" ) ) {
+			IHRConfigurationClient.shared().deletePremiumItem( intent.getStringArrayListExtra( "archive" ) );
+		} else if ( action.equals( "discard" ) ) {
+			IHRConfigurationClient.shared().siteDiscard( intent.getStringExtra( "site" ) , intent.getBooleanExtra( "forget" , false ) );
+		}
+
+		return true;
+	}
+
+	@Override
+	protected void prepareContent() {
+		if ( null == mMainView ) mMainView = new IHRViewMain( this );
+		mShowMain = true;
+	}
+
+	@Override
+	protected void swapController( IHRController inNew , IHRController inOld ) {
+		String					callLetters;
+		View					view = ( null == inNew ) ? null : inNew.content();
+		int						orientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
+		int						flags_mask = WindowManager.LayoutParams.FLAG_FULLSCREEN;
+		int						flags = 0;
+
+		if ( inNew instanceof IHRControllerPlayer ) {
+			Intent				intent = inNew.getIntent();
+			IHRStation			station;
+
+			callLetters = intent.getStringExtra( "station" );
+
+			if ( callLetters == null || callLetters.length() == 0 ) {
+				callLetters = IHRPlayerClient.shared().getIdentifier();
+			}
+
+			if ( callLetters != null && callLetters.length() > 0 ) {
+				synchronized( this ) {
+					if ( mCurrentStationCallLetters == null || ! callLetters.equals( mCurrentStationCallLetters ) ) {
+						mCurrentStationCallLetters = callLetters;
+						mCurrentStationLogo = null;
+
+						if ( !IHRStation.isTraffic( callLetters ) && !callLetters.startsWith( "#" ) && !callLetters.startsWith( "!" ) ) {
+							station = IHRConfigurationClient.shared().stationForCallLetters( callLetters );
+							IHRHTTP.fetchAsynchronous( station.getLogoURL(), this, callLetters );
+						} else if ( intent.hasExtra( "premium" ) ) {
+							station = new IHRStation( intent.getStringArrayListExtra( "premium" ) );
+
+							IHRHTTP.fetchAsynchronous( station.getLogoURL(), this, callLetters );
+						}
+					}
+				}
+			}
+		} else if ( inNew instanceof IHRControllerVideo ) {
+			orientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+			flags = WindowManager.LayoutParams.FLAG_FULLSCREEN;
+		}
+
+		//	set orientation if needed
+		if ( orientation != this.getRequestedOrientation() ) {
+			this.setRequestedOrientation( orientation );
+		}
+
+		//	set full screen if needed
+		if ( ( this.getWindow().getAttributes().flags & flags_mask ) != flags ) {
+			this.getWindow().setFlags( flags , flags_mask );
+
+			//	pause and resume audio for full screen content
+			Streamradio.g.playingAlternateAudio( 0 != ( flags & WindowManager.LayoutParams.FLAG_FULLSCREEN ) );
+		}
+
+		if ( inNew instanceof IHRControllerSplash || inNew instanceof IHRControllerVideo ) {
+			setContentView( view );
+			mShowMain = true;
+		} else {
+			if ( mShowMain ) setContentView( mMainView );
+			mMainView.setContentView( view, inNew == null ? false : inNew.wantsBanner() );
+			mShowMain = false;
+		}
+	}
+
+	@Override
+	public boolean onKeyDown( int keyCode , KeyEvent event ) {
+		boolean					result = true;
+
+		switch ( keyCode ) {
+//		case KeyEvent.KEYCODE_SEARCH: pushCitiesList(); break;
+//		case KeyEvent.KEYCODE_MENU: pushPrimaryList(); break;	//	could show player if playing and at primary list
+
+		case KeyEvent.KEYCODE_MEDIA_STOP: IHRPlayerClient.shared().stop(); break;
+		case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE: IHRPlayerClient.shared().togglePlaying(); break;
+
+		/**
+		case KeyEvent.KEYCODE_MUTE:
+		case KeyEvent.KEYCODE_VOLUME_DOWN:
+		case KeyEvent.KEYCODE_VOLUME_UP: IHRPlayerClient.shared().setVolumeByKeycode( keyCode ); break;
+		/**/
+
+		/*
+		adb shell ls sdcard/
+		adb pull sdcard/IHRActivity.trace /tmp/
+		traceview /tmp/IHRActivity.trace
+		*/
+
+		//** TODO: disable debug code
+//		case KeyEvent.KEYCODE_D: this.displayAlert( "Start tracing" ); Debug.startMethodTracing( "IHRActivity" , 1<<24 ); break;
+//		case KeyEvent.KEYCODE_S: Debug.stopMethodTracing(); this.displayAlert( "Cease tracing" ); break;
+		/**/
+
+		default: result = super.onKeyDown( keyCode , event ); break;
+		}
+
+		return result;
+	}
+
+	@Override
+	protected void onNoController( boolean inCreating ) {
+		if ( !inCreating ) {
+			setResult( Activity.RESULT_OK );
+			finish();
+		}
+	}
+
+	@Override
+	protected void onControllerResult( int inCode , int inResult , Intent inParameters ) {
+		if ( 1 == inCode && RESULT_CANCELED != inResult ) {
+			showPrimaryController();
+		} else {
+			onNoController( false );
+		}
+	}
+
+}

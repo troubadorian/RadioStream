@@ -1,0 +1,112 @@
+package com.clearchannel.iheartradio.model;
+
+
+import org.xml.sax.Attributes;
+
+import com.clearchannel.iheartradio.android.model.IHRHashtable;
+import com.clearchannel.iheartradio.android.model.IHRVector;
+
+/*
+ *  premium{}
+ *    channels[]
+ *      channel{}
+ *        name
+ *        description
+ *        site
+ *        call_letters
+ *        logo_url
+ *        podcast_url
+ *        station_url
+ *        validate_url
+ *        purchase_url
+ *        recovery_url
+ *        reminder_url
+ *        authenticated_stream
+ *        trial_username
+ *        trial_password
+ *        trial_expiring
+ *        tolerance
+ *        schedule{}
+ *          timezone
+ *          days[]
+ *            day{}
+ *              start
+ *              duration
+ *              description
+ * */
+
+public class IHRXMLPremiumParser extends IHRXMLParser {
+	public IHRHashtable			_current;
+	public String				_key;
+	public String				_value;
+	
+	public IHRHashtable			_channel;
+	public IHRVector			_premium_array;
+	public IHRHashtable			_premium;
+	public IHRVector			_schedule_array;
+	public IHRHashtable			_schedule;
+	public IHRHashtable			_day;
+	
+	@Override
+	public void endElement( String inURL , String inName , String inQualified ) {
+		if ( inName.equalsIgnoreCase( "day" ) ) {
+			_schedule_array.add( _day );
+			_day = null;
+			_current = _schedule;
+		} else if ( inName.equalsIgnoreCase( "schedule" ) ) {
+			_schedule.put( "days" , _schedule_array );
+			_channel.put( inName.toLowerCase() , _schedule );
+			_schedule_array = null;
+			_schedule = null;
+			_current = _channel;
+		} else if ( inName.equalsIgnoreCase( "channel" ) ) {
+			String				site = (String)_channel.get( "site" );
+			
+			if ( null != site && 0 != site.length() ) {
+				if ( null == _channel.get( "delegate_url" ) && null != _premium.get( "delegate_url" ) ) {
+					_channel.put( "delegate_url" , _premium.get( "delegate_url" ) + site );
+				}
+				if ( null == _channel.get( "mediavault_url_droid" ) && null != _premium.get( "mediavault_url_droid" ) ) {
+					_channel.put( "mediavault_url_droid" , _premium.get( "mediavault_url_droid" ) + site );
+				}
+				if ( null == _channel.get( "validate_url" ) && null != _premium.get( "validate_url" ) ) {
+					_channel.put( "validate_url" , _premium.get( "validate_url" ) + site );
+				}
+			}
+			
+			_premium_array.add( _channel );
+			_channel = null;
+			_current = _premium;
+		} else if ( inName.equalsIgnoreCase( "premium" ) ) {
+			_premium.put( "channels" , _premium_array );
+			_premium_array = null;
+			_current = null;
+		} else if ( null != _current && null != _key ) {
+			_current.put( _key.toLowerCase() , mContents );
+			_key = null;
+		}
+	}
+	
+	@Override
+	public void startElement( String inURL , String inName , String inQualified , Attributes inAttributes ) {
+		if ( inName.equalsIgnoreCase( "day" ) ) {
+			_day = new IHRHashtable();
+			_current = _day;
+		} else if ( inName.equalsIgnoreCase( "schedule" ) ) {
+			_schedule_array = new IHRVector();
+			_schedule = new IHRHashtable();
+			_current = _schedule;
+		} else if ( inName.equalsIgnoreCase( "channel" ) ) {
+			_channel = new IHRHashtable();
+			_current = _channel;
+		} else if ( inName.equalsIgnoreCase( "premium" ) ) {
+			_premium_array = new IHRVector();
+			_premium = new IHRHashtable();
+			_current = _premium;
+		} else if ( null != _current ) {
+			_key = inName;
+		}
+		
+		mContents = "";
+	}
+}

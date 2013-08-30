@@ -1,0 +1,37 @@
+package com.troubadorian.streamradio.client.view;
+
+import android.content.Intent;
+import android.view.ContextMenu;
+import android.view.MenuItem;
+import android.widget.AdapterView;
+import android.widget.SimpleCursorAdapter;
+
+import com.troubadorian.streamradio.client.model.IHRSongCursor;
+import com.troubadorian.streamradio.controller.IHRControllerActivity;
+
+public class IHRViewTagged extends IHRListView {
+	
+	public IHRViewTagged( IHRControllerActivity inContext ) {
+		super( inContext );
+	}
+	
+	@Override
+	public void addContextMenuItems( ContextMenu menu, ContextMenu.ContextMenuInfo menuInfo ) {
+		String									artist, track;
+		IHRSongCursor							cursor;
+		AdapterView.AdapterContextMenuInfo		info;
+		MenuItem								item;
+
+		cursor = (IHRSongCursor) ((SimpleCursorAdapter) getAdapter()).getCursor();
+		info = (AdapterView.AdapterContextMenuInfo) menuInfo;
+		
+		artist = cursor.getStringForIndex( 1, info.position );
+		track = cursor.getStringForIndex( 0, info.position );
+		
+		item = menu.add( "Delete tagged song" );
+		item.setIntent( new Intent().putExtra( "artist", artist ).putExtra( "track", track ).putExtra( "action", "delete" ) );
+
+		item = menu.add( "Cancel" );
+		item.setIntent( new Intent().putExtra( "action", "cancel" ) );
+	}
+}

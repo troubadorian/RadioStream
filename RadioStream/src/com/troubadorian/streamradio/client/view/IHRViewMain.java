@@ -1,0 +1,284 @@
+package com.troubadorian.streamradio.client.view;
+
+import android.content.Intent;
+import android.graphics.Bitmap;
+import android.os.Handler;
+import android.os.Message;
+import android.view.View;
+import android.view.ViewGroup;
+
+import com.troubadorian.streamradio.client.model.IHRConfigurationClient;
+import com.troubadorian.streamradio.client.model.IHRHashtable;
+import com.troubadorian.streamradio.client.services.IHRConfigurationStartup;
+import com.troubadorian.streamradio.client.services.IHRService;
+import com.troubadorian.streamradio.controller.IHRActivity;
+import com.troubadorian.streamradio.controller.IHRControllerFavorites.IHRFavorites;
+import com.troubadorian.streamradio.controller.IHRControllerPlayer;
+import com.troubadorian.streamradio.controller.IHRControllerSettings.IHRViewSettings;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+
+public class IHRViewMain extends ViewGroup implements Handler.Callback {
+	protected IHRViewBanner				mBanner;
+	protected IHRActivity				mDelegate;
+	protected View						mContent;
+	protected IHRViewHeader				mHeader;
+	protected IHRViewTabBar				mTabBar;
+
+	//hold the intent of the current controller player for "Now Playing" button on the header
+	public Intent					   mPlayerIntent;
+
+	protected boolean					mOffline;
+	
+	protected long						mBannerInterval;
+	protected long						mBannerClosedTime;
+	protected boolean					mBannerDisplayed;
+	protected String					mBannerURL;
+	protected boolean					mBannerWanted;
+	
+	public IHRViewMain( IHRActivity context ) {
+		super( context );
+
+//		IHRAd.shared().mHandlerBanner = new Handler( this );
+		mDelegate = context;
+		
+		addView( mBanner = new IHRViewBanner( context, this ) );
+		addView( mHeader = new IHRViewHeader( context, this ) );
+		addView( mTabBar = new IHRViewTabBar( context, this ) );
+		
+		mBanner.setVisibility( View.GONE );
+		mBannerInterval = -1;
+	}
+	
+	public void bannerClicked() {
+		if ( mBannerURL != null ) {
+//			IHRAd.shared().report( IHRAd.kAdPurposeClickBanner );
+			mDelegate.openWebURL( mBannerURL );
+		}
+	}
+	
+	public void bannerClosed() {
+		mBanner.setVisibility( View.GONE );
+		mBannerDisplayed = false;
+		mBannerClosedTime = System.currentTimeMillis();
+	}
+	
+	public boolean handleMessage( Message message ) {
+		updateBanner( mContent, mBannerWanted );
+
+		return true;
+	}
+	
+	public void setOffline( boolean inOffline ) {
+		if ( inOffline != mOffline ) {
+			mOffline = inOffline;
+			mTabBar.setSelectedTab( inOffline ? -1 : IHRViewTabBar.kTabBarButtonCategories );
+			mTabBar.setEnabled( !inOffline );
+		}
+	}
+	
+	public void updateBanner( View view, boolean wantsBanner ) {
+		Bitmap						bitmap;
+		IHRConfigurationStartup		startup;
+		IHRHashtable				hash;
+		
+		if ( mOffline ) {
+			wantsBanner = false;
+		}
+		
+		if ( ( mBannerWanted = wantsBanner ) ) {
+			if ( mBannerDisplayed ) {
+				// if the banner was visible then just show it again
+				mBanner.setVisibility( View.VISIBLE );
+//				IHRAd.shared().report( IHRAd.kAdPurposeImpressionBannerSecondary );
+			} else {
+				if ( mBannerInterval < 0 ) {
+					startup = IHRConfigurationClient.shared().copyStartup();
+					
+					if ( null != startup ) {
+						mBannerInterval = startup.mAdsBannerRefreshInterval * 1000;
+					}
+				}
+				
+				// the view wants an ad but we don't have one available
+				// look to see what the banner refresh interval is.
+				if ( mBannerInterval < ( System.currentTimeMillis() - mBannerClosedTime ) ) {
+//					hash = IHRAd.shared().request( IHRAd.kAdTypeBanner, null );
+//					bitmap = ( null == hash ) ? null : (Bitmap)hash.get( "banner_image" );
+					
+//					if ( bitmap != null ) {
+//						mBannerDisplayed = true;
+//						mBannerURL = (String) hash.get( "ad_url" );
+//
+//						mBanner.setBitmap( bitmap );
+//						mBanner.setVisibility( View.VISIBLE );
+
+//						IHRAd.shared().report( IHRAd.kAdPurposeImpressionBanner );
+//					}
+				}
+			}
+		} else {
+			// the view does not want the banner
+			mBanner.setVisibility( View.GONE );
+		}
+	}
+	
+	/**
+	 * For "Now Playing" button on the header
+	 */
+	public void pushPlayerIntent( ) {
+		if (mPlayerIntent != null) {
+			mDelegate.pushControllerIntent(mPlayerIntent);
+		} else {
+			try {
+				mDelegate.pushPlayer(IHRService.g.preferencesGet( "autoplay_letters" , "" ));
+			} catch (Exception e) {
+				// TODO Auto-generated catch block
+				{
+					System.out.println("mplayerIntent is null");
+					nowplayingalert();//Changes made by sriram on 09-23-2010
+				}
+				//Code ends here				
+				e.printStackTrace();
+			}
+		}
+	}
+	//Code added by sriram for displaying the alert when Now Playing is not available 09-23-2010
+	public void nowplayingalert()
+	{
+		AlertDialog altdlg;
+		altdlg=new AlertDialog.Builder(mDelegate).create();
+		altdlg.setTitle("Now Playing Alert");
+		altdlg.setMessage("You don't have any station playing in Now Playing.");
+		altdlg.setButton("OK", new DialogInterface.OnClickListener() {
+
+		      public void onClick(DialogInterface dialog, int which) {
+		    	  dialog.cancel();
+		    	  return;
+
+		    } }); 
+		altdlg.show();
+		
+	}
+	//Code ends here
+	public Intent getPlayerIntent() {
+		if(mContent != null && mContent instanceof IHRViewPlayer){
+			//remember the intent of the current controller player 
+			//for "Now Playing" button on the header
+			mPlayerIntent = ((IHRViewPlayer)mContent).mDelegate.getIntent();
+			mPlayerIntent.setFlags(Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT);
+			return mPlayerIntent;
+		}else{
+			return mPlayerIntent;
+		}
+	}
+	
+	public void setContentView( View view, boolean wantsBanner ) {
+		if(mContent != null && mContent instanceof IHRViewPlayer){
+			//remember the intent of the current controller player 
+			//for "Now Playing" button on the header
+			mPlayerIntent = ((IHRViewPlayer)mContent).mDelegate.getIntent();
+			mPlayerIntent.setFlags(Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT);
+		}
+		
+		if ( null != mContent ) removeView( mContent );
+		
+		if ( null == ( mContent = view ) ) return;
+		
+		addView( mContent );
+		
+		updateBanner( view, wantsBanner );
+		
+		mHeader.showFavorite( view instanceof IHRViewPlayer );
+		
+		if (!mDelegate.hasConnectivity()) {
+			mHeader.hideNowPlaying();
+		}
+			
+		if ( null == view ) ;
+		else if ( view instanceof IHRViewPlayer ) {
+			//mTabBar.setSelectedTab( IHRViewTabBar.kTabBarButtonPlayer );
+			mTabBar.setSelectedTab( IHRViewTabBar.kTabBarButtonCategories );
+		}
+		else if ( view instanceof IHRViewRandomizer ) mTabBar.setSelectedTab( IHRViewTabBar.kTabBarButtonRandomizer );
+		else if ( view instanceof IHRFavorites ) mTabBar.setSelectedTab( IHRViewTabBar.kTabBarButtonFavorites );
+		else if ( view instanceof IHRViewFavorites ) mTabBar.setSelectedTab( IHRViewTabBar.kTabBarButtonFavorites );
+		else if ( view instanceof IHRViewTagged ) mTabBar.setSelectedTab( IHRViewTabBar.kTabBarButtonFavorites );
+		else if ( view instanceof IHRViewSettings ) mTabBar.setSelectedTab( IHRViewTabBar.kTabBarButtonSettings );
+		else mTabBar.setSelectedTab( IHRViewTabBar.kTabBarButtonCategories );
+	}
+
+	public void setSelectedTab( int tabType ) {
+		switch ( tabType ) {
+			default:
+			case IHRViewTabBar.kTabBarButtonCategories:		mDelegate.pushPrimaryList( false );	break;		
+			case IHRViewTabBar.kTabBarButtonFavorites:		mDelegate.pushFavoritesList(true);		break;
+			case IHRViewTabBar.kTabBarButtonPlayer:			mDelegate.pushPlayer( "" );			break;
+			case IHRViewTabBar.kTabBarButtonRandomizer:		mDelegate.pushRandomizer();			break;
+			case IHRViewTabBar.kTabBarButtonSettings:		mDelegate.pushSettings();			break;
+		}
+	}
+	
+	@Override
+	public void onMeasure( int inMeasureWidth , int inMeasureHeight ) {
+		int						height = MeasureSpec.getSize( inMeasureHeight );
+		
+		this.setMeasuredDimension( MeasureSpec.getSize( inMeasureWidth ) , height );
+		
+		if ( null != mHeader ) {
+			mHeader.measure( inMeasureWidth , MeasureSpec.makeMeasureSpec( IHRViewHeader.kHeaderHeight , MeasureSpec.EXACTLY ) );
+			
+			height -= IHRViewHeader.kHeaderHeight;
+		}
+		
+		if ( null != mBanner && View.GONE != mBanner.getVisibility() ) {
+			mBanner.measure( inMeasureWidth , MeasureSpec.makeMeasureSpec( IHRViewBanner.kBannerHeight , MeasureSpec.EXACTLY ) );
+			
+			height -= IHRViewBanner.kBannerHeight;
+		}
+		
+		if ( null != mTabBar ) {
+			mTabBar.measure( inMeasureWidth , MeasureSpec.makeMeasureSpec( IHRViewTabBar.kTabBarHeight , MeasureSpec.EXACTLY ) );
+			
+			height -= IHRViewTabBar.kTabBarHeight;
+		}
+		
+		if ( null != mContent ) {
+			mContent.measure( inMeasureWidth , MeasureSpec.makeMeasureSpec( height , MeasureSpec.AT_MOST ) );
+		}
+	}
+	
+	@Override
+	protected void onLayout( boolean changed, int l, int t, int r, int b ) {
+		int						h, w, y;
+		
+		h = b - t;
+		w = r - l;
+		
+		mHeader.layout( 0, 0, w, y = IHRViewHeader.kHeaderHeight );
+		
+		h -= y + IHRViewTabBar.kTabBarHeight;
+
+		// if banner is visible...
+		if ( mBanner.getVisibility() != View.GONE ) h -= IHRViewBanner.kBannerHeight;
+		
+		if ( mContent != null ) {
+//			mContent.requestLayout();
+			
+				try {
+					mContent.layout( 0, y, w, y + h );
+				} catch (Exception e) {
+					// TODO This is a temporary fix to prevent the app from crashing when going out of bounds drawing the station list for a city. See IHRCityCursor.
+				}
+		}
+		
+		y += h;
+
+		if ( mBanner.getVisibility() != View.GONE ) {
+			mBanner.layout( 0, y, w, y + IHRViewBanner.kBannerHeight );
+			y += IHRViewBanner.kBannerHeight;
+		}
+
+		mTabBar.layout( 0, y, w, y + IHRViewTabBar.kTabBarHeight );
+	}
+}

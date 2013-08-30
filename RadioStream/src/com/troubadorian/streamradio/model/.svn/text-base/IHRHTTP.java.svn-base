@@ -1,0 +1,348 @@
+package com.clearchannel.iheartradio.model;
+
+import java.io.IOException;
+
+import com.clearchannel.iheartradio.android.model.IHRHTTPConnection;
+import com.clearchannel.iheartradio.android.model.IHRURLEncoder;
+
+/*
+A IHRHTTP object interacts with HTTP servers.
+
+For iheartradio, there are several different ways HTTP
+servers are accessed depending on the particular data
+requirements of a given operation.  These are:
+
+1.  Synchronous requests which require response data from
+	the HTTP server before the application can continue.
+
+	An example of this type of request is a request for a
+	configuration file at application startup.
+
+	This type of request will have data of a fixed size.
+	When the call returns the HTTP connection is completely
+	closed and all response data from the server is resident
+	in the IHRHTTP object.
+
+2.  Asynchronous requests for audio data from a Shoutcast
+	streaming audio server.
+
+	This type of connection will have data of an effectively
+	unlimited size.  The HTTP connection stays open until it is
+	explicitly closed.
+
+	The current release of iheartradio does not cache audio data.
+	Therefore, the only reason for an HTTP-based Shoutcast stream
+	to be open is to supply data to the device's audio player.
+	This implies that at most one connection of this type may
+	ever be extant.
+
+3.	Asynchronous requests which obtain data that is not
+	required for the application to continue.
+
+	An example of this type of request is a request for
+	album artwork.  If the HTTP request fails to complete, or
+	completes after the currently playing song has switched
+	to something else (i.e. the artwork does not match the
+	currently playing song) the app can continue with no
+	penalty.
+
+	One of the design goals of iheartradio is to present the
+	user with a seamless (i.e. non-choppy) audio experience.
+	Our audio streams are AAC data encoded at 64kbps.  To
+	facilitate this experience on data networks such as EDGE
+	where available bandwidth might be 75kbps or lower we
+	try to leave as much bandwidth as possible available to
+	the audio stream described in #2 above.  We make the
+	assumption (realizing network conditions will vary) that
+	bandwidth is divided equally amongst all open network
+	sockets.  Given this assumption, if n represents the
+	number of concurrent network connections, then the bandwidth
+	available to any given connection is:
+
+	per connection bandwidth = available bandwidth / n.
+
+	Thus if we want to maximize the bandwidth available to the
+	audio stream connection while still allowing receipt of
+	things like album artwork, we must make n as low as possible.
+	This means the number of concurrent HTTP connections n == 2.
+
+4.	Asynchronous requests which do not obtain data.
+
+	iheartradio reports statistics on ad impressions by sending
+	an HTTP GET request to a logging server with appropriate
+	query string parameters.  No data is expected from the HTTP
+	server.  This type of connection is really just a special case
+	of #3 above.
+*/
+
+public class IHRHTTP extends IHRHTTPConnection implements Runnable {
+	protected int						mBytesRead;
+	protected int						mBytesReadThisInterval;
+	protected Object					mContext;
+	protected byte[]					mData;
+	protected IHRHTTPDelegate			mDelegate;
+	protected long						mFirstByteReadTime;
+	protected boolean					mIgnoreReply;
+	protected int						mInstance;
+	protected long						mIntervalStartTime;
+	protected Thread					mThread;
+	
+	protected static int				sInstances;
+	protected static boolean			sProhibitNewConnections;
+	
+	protected static final long			kIntervalMs = 1000;
+	protected static final long			kTimeoutMs = 30000;
+
+	//protected LogWriter log = new LogWriter();
+	// Factories:
+
+	// This method instantiates an IHRHTTP object that makes an
+	// asynchronous HTTP request (i.e. a new thread is created to
+	// handle the connection).
+	//
+	// url is the URL to fetch.
+	
+	static public IHRHTTP fetchAsynchronous( String url, IHRHTTPDelegate delegate, Object context ) {
+		return fetchAsynchronous( url, delegate, context, null, null );
+	}
+
+	static public IHRHTTP fetchAsynchronous( String url, IHRHTTPDelegate delegate, Object context, IHRURLEncoder postData ) {
+		return fetchAsynchronous( url, delegate, context, postData, null );
+	}
+
+	static public IHRHTTP fetchAsynchronous( String url, IHRHTTPDelegate delegate, Object context, IHRURLEncoder postData , String inCredentialsIdentifier ) {
+		IHRHTTP				http;
+
+		http = new IHRHTTP( url, delegate, context, postData );
+		http.mCredentialsIdentifier = inCredentialsIdentifier;
+		http.mIgnoreReply = delegate == null;
+		
+		( http.mThread = new Thread( http , "Fetch " + url ) ).start();
+
+		return http;
+	}
+
+	public static IHRHTTP deliver( String inURL , IHRURLEncoder inPost , String inCredentialsIdentifier ) {
+		IHRHTTP				http;
+		
+		http = new IHRHTTP( inURL , null , null , inPost );
+		http.mCredentialsIdentifier = inCredentialsIdentifier;
+		http.mIgnoreReply = true;
+		
+		( http.mThread = new Thread( http , "Fetch " + inURL ) ).start();
+		
+		return http;
+	}
+	
+	public static byte[] request( String inURL , IHRURLEncoder inPost , String inCredentialsIdentifier ) {
+		IHRHTTP				http;
+		
+		http = new IHRHTTP( inURL , null , null , inPost );
+		http.mCredentialsIdentifier = inCredentialsIdentifier;
+		http.mIgnoreReply = false;
+		http.run();
+		
+		return http.getDataNoThrow();
+	}
+	
+	// This method instantiates an IHRHTTP object that
+	// requests data synchronously (#1 above).
+	//
+	// If the function returns, the HTTP server returned 200 (OK) and
+	// the returned array contains the entire HTTP response.  Otherwise,
+	// an IOException is thrown.
+	//
+	// This method will block the calling thread so it should not generally
+	// be called on the main thread.  On BlackBerry devices it should never
+	// be called on the main thread.
+	static public byte[] fetchSynchronous( String url ) throws IOException {
+		return fetchSynchronous( url, null );
+	}
+
+	static public byte[] fetchSynchronous( String url, IHRURLEncoder postData ) throws IOException {
+		return fetchSynchronous( url, postData, false );
+	}
+		
+	static public byte[] fetchSynchronous( String url, IHRURLEncoder postData, boolean ignoreReply ) throws IOException {
+		IHRHTTP				http;
+
+		http = new IHRHTTP( url, null, null, postData );
+		http.mIgnoreReply = ignoreReply;
+		http.run();
+
+		return http.getData();
+	}
+	
+	static public void reportSynchronous( String url ) throws IOException {
+		fetchSynchronous( url, null, true );
+	}
+
+	static public void setProhibitNewConnections( boolean prohibit ) {
+		synchronized( IHRHTTP.class ) {
+			if ( ! ( sProhibitNewConnections = prohibit ) ) IHRHTTP.class.notifyAll();
+		}
+	}
+
+	// Cancel an in-progress asynchronous request.  The running thread
+	// will exit, however no guarantee is made as to when this actually
+	// takes place (thus synchronization is not required).
+	public void cancel() { mCancelled.set( true ); }
+
+	// getters
+	public int getBytesRead() { return mBytesRead; }	// no synchronization therefore this value is approximate
+	public Object getContext() { return mContext; }
+	public byte[] getData() throws IOException {
+		if ( ! mIgnoreReply && ! mSuccess ) throw new IOException( "HTTP request failed" );
+
+		return mData;
+	}
+	public long getFirstByteReadTime() { return mFirstByteReadTime; }
+//	public Thread getThread() { return mThread; }
+	public String getURL() { return mURL; }
+	public byte[] getDataNoThrow() { return mData; }
+
+	// protected methods
+
+	protected IHRHTTP() { this( null, null, null, null ); }
+	protected IHRHTTP( String inURL , byte[] inPost ) { super( inURL , inPost ); }
+	
+	protected IHRHTTP( String url, IHRHTTPDelegate delegate, Object context, IHRURLEncoder postData ) {
+		super( url, postData == null ? null : postData.getBytes() );
+		
+		synchronized( IHRHTTP.class ) { mInstance = sInstances++; }
+
+		mContext = context;
+		mDelegate = delegate;
+	}
+
+	@Override
+	protected void processData( byte[] data ) throws Exception {
+		byte[]					buffer;
+
+		if ( mData == null ) {
+			mData = new byte[ data.length ];
+			System.arraycopy( data, 0, mData, 0, data.length );
+		} else {
+			buffer = new byte[ mData.length + data.length ];
+			System.arraycopy( mData, 0, buffer, 0, mData.length );
+			System.arraycopy( data, 0, buffer, mData.length, data.length );
+			mData = buffer;
+		}
+	}
+
+	protected void read() throws IOException {
+		byte[]					buffer;
+//		long					elapsed;
+		String					message;
+		long					now;
+		int						n;
+
+		while ( ! mCancelled.get() ) {
+			if ( mContentLength > 0 && mBytesRead >= mContentLength ) {
+				mSuccess = true;
+				break;
+			}
+			
+			try {
+				if ( mContentLength > 0x00010000 ) {
+					n = 0x00020000;	//	128k
+				} else {
+					n = 0x00001000;	//	  8k
+				}
+				
+				n = 8192;
+				buffer = new byte[n];
+				
+				if ( ( n = mInputStream.read( buffer ) ) < 0 ) {
+					if ( mContentLength > 0 ) throw new IOException( "unexpected end of file" );
+
+					mSuccess = true;
+					break;
+				} else if ( mCancelled.get() ) {
+					throw new IOException( "cancelled" );
+					
+					//break;
+				} else if ( n > 0 ) {
+					if ( n != buffer.length ) {
+						byte[] tmp = new byte[ n ];
+						System.arraycopy( buffer, 0, tmp, 0, n );
+						buffer = tmp;
+					}
+
+					now = System.currentTimeMillis();
+					
+					if ( mFirstByteReadTime == 0 ) {
+//						elapsed = 0;
+						mFirstByteReadTime = now;
+						mIntervalStartTime = now - now % kIntervalMs;
+					} else {
+//						elapsed = now - mFirstByteReadTime;
+					}
+
+					if ( ( now - mIntervalStartTime ) > kIntervalMs ) {
+						mBytesReadThisInterval = 0;
+						mIntervalStartTime = now - now % kIntervalMs;
+					}	
+					
+					mBytesRead += n;
+					mBytesReadThisInterval += n;
+
+/**/
+					message = null;
+/*/
+					if ( elapsed > 0 ) {
+						double	kBps;
+						
+						// kBps = ( B / 1000 ) / ( ms / 1000 ) = ( b / 1000 * 1000 / ms ) = ( b / 1 * 1 / ms ) = b / ms
+
+						kBps = (double) mBytesReadThisInterval / (double)( now - mIntervalStartTime );
+						kBps = ((int)(kBps * 100.0)) / 100.0;
+						
+						message = kBps * 8 + " kbps current, ";
+
+						kBps = (double) mBytesRead / (double) elapsed;
+						kBps = ((int)(kBps * 100.0)) / 100.0;
+
+						message += + kBps * 8 + " kbps overall";
+					}
+/**/
+					//log.write("Inside Tunnel Reader \r\n");
+					//log.write(new String(buffer));
+
+					processData( buffer, message );
+				}
+			} catch ( Exception e ) {
+				log( "read", "caught " + e.toString() );
+
+				throw new IOException( e.getMessage() );
+			}
+		}
+	}
+	
+	
+	public void openThenClose() {
+		try {
+			open();
+			if ( ! mIgnoreReply ) read();
+		} catch ( Exception e ) {
+			mData = null;
+		}
+		
+		close();
+	}
+	
+	
+	public void run() {
+		// To effect the guarantee that no more than one network connection may
+		// run concurrent to the audio stream connection, we synchronize here to
+		// serialize all non-stream HTTP requests.
+		synchronized( IHRHTTP.class ) {
+			while ( sProhibitNewConnections ) try { IHRHTTP.class.wait(); } catch ( Exception e ) { }
+		}
+
+		// no longer serialize anything, bd 04.11.10
+		openThenClose();
+
+		if ( mDelegate != null ) mDelegate.httpFetchComplete( this );
+	}
+}

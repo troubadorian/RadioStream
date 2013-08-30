@@ -1,0 +1,360 @@
+package com.clearchannel.iheartradio.model;
+
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import com.clearchannel.iheartradio.android.model.IHRHashtable;
+import com.clearchannel.iheartradio.android.model.IHRVector;
+
+public class IHRStation extends ArrayList<String> {
+	private static final long	serialVersionUID	= 1L;
+	
+	public static final String	kTrafficPrefix = "";
+	public static final String	kTrafficSuffix = " Traffic";
+	public static final String	kTrafficDetail = "Updates every 15 minutes Mon-Fri 5AM-10PM";
+	
+	public static final String[]kMap = {
+		"ads_dart_params" ,
+		"ads_disabled" ,
+		"call_letters" ,
+		"description" ,
+		"disable_song_tagging" ,
+		"file_artist" ,
+		"file_lyrics_id" ,
+		"file_title" ,
+		"file_url" ,
+		"is_talk" ,
+		"logo_url" ,
+		"name" ,
+		"station_id" ,
+		"station_url" ,
+		"stream_url_rtsp" ,				//	stream_url on others
+		"stream_url_authenticated" ,
+		"stream_url_fallback" ,
+		"stream_url_fallback_authenticated" ,
+		"tuner_address" ,
+		"video_url" ,
+		"video_url_low_bandwidth" };
+	
+	//	must be in same order as kMap 
+	public static final int		kAdsDartParams = 0;
+	public static final int		kAdsDisabled = 1;
+	public static final int		kCallLetters = 2;
+	public static final int		kDescription = 3;
+	public static final int		kDisableSongTagging = 4;
+	public static final int		kFileArtist = 5;
+	public static final int		kFileLyricsID = 6;
+	public static final int		kFileTitle = 7;
+	public static final int		kFileURL = 8;
+	public static final int		kIsTalk = 9;
+	public static final int		kLogoURL = 10;
+	public static final int		kName = 11;
+	public static final int		kStationID = 12;
+	public static final int		kStationURL = 13;
+	public static final int		kStreamURL = 14;
+	public static final int		kStreamURLAuthenticated = 15;
+	public static final int		kStreamURLFallback = 16;
+	public static final int		kStreamURLFallbackAuthenticated = 17;
+	public static final int		kTunerAddress = 18;
+	public static final int		kVideoURL = 19;
+	public static final int		kVideoURLLowBandwidth = 20;
+	
+	public static final int		kCapacity = 21;
+	
+	public IHRStation() { super(); }
+	public IHRStation( Collection<String> inStation ) { super( inStation ); }
+	public IHRStation( String[] inStation ) { super( Arrays.asList( inStation ) ); }
+	public IHRStation( List<String> inKeys , List<String> inValues ) { super( kCapacity ); applyKeysWithValues( inKeys , inValues ); }
+	
+	public boolean getAdsDisabled() { String field = get( kAdsDisabled ); return field != null && field.equals( "1" ); }
+	public String getLogoURL() { return get( kLogoURL ); }
+	public String getName() { return get( kName ); }
+	public String getDescription() { return get( kDescription ); }
+	public boolean getIsTalk() { String field = get( kIsTalk ); return field != null && field.equals( "1" ); } 
+	public String getCallLetters() { return get( kCallLetters ); }
+	public boolean getTagDisabled() { String field = get( kDisableSongTagging ); return field != null && field.equals( "1" ); } 
+	
+	public String getVideoURL( boolean inPreferLowBandwidth ) {
+		String					result = get( inPreferLowBandwidth ? kVideoURLLowBandwidth : kVideoURL );
+		
+		if ( null == result || 0 == result.length() ) result = get( inPreferLowBandwidth ? kVideoURL : kVideoURLLowBandwidth );
+		
+		return result;
+	}
+	
+	public String getBaseStreamURL( boolean inAuthenticated ) {
+		return get( inAuthenticated ? kStreamURLAuthenticated : kStreamURL );
+	}
+	
+	public boolean isFile() { return get( kFileURL ).length() > 0; }
+	public boolean isVideo() { return get( kVideoURL ).length() > 0 || get( kVideoURLLowBandwidth ).length() > 0; }
+	public boolean isStream() { return get( kStreamURL ).length() > 0 /*|| get( kStreamURLAuthenticated ).length() > 0*/; }
+	
+	public void applyKeysWithValues( List<String> inKeys , List<String> inValues ) {
+		HashMap<String,String>	map = new HashMap<String,String>();
+		int						index , count;
+		String					key , value;
+		
+		count = inKeys.size();
+		index = inValues.size();
+		if ( count > index ) count = index;
+		for ( index = 0 ; index < count ; ++index ) {
+			map.put( inKeys.get( index ) , inValues.get( index ) );
+		}
+		
+		count = kMap.length;
+		for ( index = 0 ; index < count ; ++index ) {
+			key = kMap[index];
+			value = map.get( key );
+			
+			if ( this.size() < index ) {
+				this.set( index , ( null == value ) ? "" : value );
+			} else {
+				this.add( ( null == value ) ? "" : value );
+			}
+		}
+	}
+	
+	public boolean isValid() {
+		if ( kCapacity > size() ) return false;
+		if ( 0 == get( kCallLetters ).length() ) return false;
+		if ( 0 == get( kDescription ).length() ) return false;
+		if ( 0 == get( kName ).length() ) return false;
+		
+		if ( isFile() || isVideo() ) {
+			//	pass through
+		} else if ( isStream() ) {
+			if ( 0 == get( kLogoURL ).length() ) return false;
+		} else {
+			return false;
+		}
+		
+		return true;
+	}
+	
+	public static String trafficName( String inName ) {
+		return kTrafficPrefix + inName.split( "," )[0].trim() + kTrafficSuffix;
+	}
+	
+	public static String trafficCall( String inName ) {
+		return "# " + inName + " Traffic";
+	}
+	
+	public static boolean isTraffic( String inLetters ) {
+		return inLetters.toUpperCase().endsWith( " TRAFFIC" );
+	}
+	
+	public static boolean isPremium( String inLetters ) {
+		return inLetters.toUpperCase().startsWith( "! PRN " );
+	}
+	
+	public static boolean canFavoriteByLetters( String inLetters ) {
+		if ( null == inLetters ) return false;
+		if ( inLetters.charAt( 0 ) == '!' ) return false;
+		if ( inLetters.charAt( 0 ) == '#' && !isTraffic( inLetters ) ) return false;
+		
+		return true;
+	}
+	
+	public static IHRStation parseCityTraffic( String inName , String inTrafficURL ) {
+		String name = trafficName( inName );
+		String letters = trafficCall( inName );
+		String description = kTrafficDetail;
+		
+		return new IHRStation( new String[] {
+				"" ,																			//	kAdsDartParams
+				"0" ,																			//	kAdsDisabled
+				letters ,																		//	kCallLetters
+				description ,																	//	kDescription
+				"1" ,																			//	kDisableSongTagging
+				description ,																	//	kFileArtist
+				"" ,																			//	kFileLyricsID
+				name ,																			//	kFileTitle
+				inTrafficURL ,																	//	kFileURL
+				"1" ,																			//	kIsTalk
+				"traffic" ,																		//	kLogoURL
+				name ,																			//	kName
+				"" ,																			//	kStationID
+				"" ,																			//	kStationURL
+				"" ,																			//	kStreamURL
+				"" ,																			//	kStreamURLAuthenticated
+				"" ,																			//	kStreamURLFallback
+				"" ,																			//	kStreamURLFallbackAuthenticated
+				"" ,																			//	kTunerAddress
+				"" ,																			//	kVideoURL
+				""																				//	kVideoURLLowBandwidth
+			} );
+	}
+	
+	public static List<Object> parseList( List inStations ) {
+		IHRVector				result = new IHRVector();
+		int						index , count = ( null == inStations ) ? 0 : inStations.size();
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			result.add( new IHRStation( (Collection<String>)inStations.get( index ) ) );
+		}
+		
+		return result;
+	}
+	
+	public static IHRStation parseLine( List<String> inKeys , List<String> inLine ) {
+		IHRStation				result = new IHRStation( inKeys , inLine );
+		
+		if ( !result.isValid() ) {
+			if ( result.getBaseStreamURL( false ).length() > 0 ) {
+//				Log.d( "reject" , result.getCallLetters() + " = " + result.getName() + " (" + result.getDescription() + ")" );
+			}
+			
+			result = null;
+		}
+		
+		return result;
+	}
+	
+	public static List parseLines( List<String> inKeys , List<List<String>> inLines , int inStart ) {
+		ArrayList<IHRStation>	result = new ArrayList<IHRStation>();
+		
+		int						index , count = inLines.size();
+		
+		if( null == inKeys && inStart > 1 && count > 1 ) {
+			inKeys = inLines.get( 1 );
+		}
+		
+		for ( index = inStart ; index < count ; ++index ) {
+			List				line = inLines.get( index );
+			IHRStation			station = parseLine( inKeys , line );
+			
+			if ( null != station ) result.add( station );
+		}
+		
+		return result;
+	}
+	
+	@SuppressWarnings( "unchecked" )
+	public static Map reverseStations( List inStations ) {
+		IHRHashtable			result = new IHRHashtable();
+		IHRStation				station;
+		String					letters;
+		int						i , n = ( null == inStations ) ? 0 : inStations.size();
+		
+		for ( i = 0 ; i < n ; ++i ) {
+			station = (IHRStation)inStations.get( i );
+			letters = station.get( kCallLetters );
+			
+			if ( null != letters ) {
+				result.put( letters , station );
+//				Log.d( "station" , letters + " = " + station.getName() + " (" + station.getDescription() + ")" );
+			}
+		}
+		
+		return result;
+	}
+	
+	//	compare call letters by station name
+	public static class NameComparator implements Comparator {
+		public Map				mStations;
+		
+		public NameComparator( Map inStations ) { mStations = inStations; }
+		
+		public int compare( Object inA , Object inB ) {
+			int					result = 0;
+			
+			if ( null == inA || null == inB ) {
+				result = ( null == inA ) ? ( null == inB ) ? 0 : 1 : -1;
+			} else if ( inA == inB || inA.equals( inB ) ) {
+				result = 0;
+			} else {
+				IHRStation		as = (IHRStation)mStations.get( inA );
+				IHRStation		bs = (IHRStation)mStations.get( inB );
+				String			an = ( null == as ) ? "" : as.getName();
+				String			bn = ( null == bs ) ? "" : bs.getName();
+				
+				result = IHRUtilities.stringCompareHonoringUnsigned( an , bn );
+//				result = an.compareTo( bn );
+				
+				if ( 0 == result ) {
+					an = ( null == as ) ? "" : as.getDescription();
+					bn = ( null == bs ) ? "" : bs.getDescription();
+					
+					result = an.compareTo( bn );
+				}
+			}
+			
+			return result;
+		}
+	}
+	
+	public static List fromStringUsingMoreMemory( String inFlattened ) {
+		ArrayList<IHRStation>	result = null;
+		String[]				expand = inFlattened.split( "\n" );
+		List<String>			pieces = Arrays.asList( expand );
+		int						index , count = expand.length;
+		IHRStation				station;
+		
+		if ( count >= kCapacity ) {
+			result = new ArrayList<IHRStation>();
+			result.ensureCapacity( count / kCapacity );
+			
+			for ( index = 0 ; index <= count - kCapacity ; index += kCapacity ) {
+				station = new IHRStation( pieces.subList( index , index + kCapacity ) );
+				result.add( station );
+			}
+		}
+		
+		return result;
+	}
+	
+	public static List fromString( String inFlattened ) {
+		ArrayList<IHRStation>		result = new ArrayList<IHRStation>();
+		IHRStation				station = new IHRStation();
+		
+		int						count , found , start = 0;
+		String					value;
+		
+		count = 0;
+		
+		do {
+			found = inFlattened.indexOf( '\n' , start );
+			value = ( found < 0 ) ? inFlattened.substring( start ) : inFlattened.substring( start , found );
+			
+			station.add( value );
+			start = found + 1;
+			count += 1;
+			
+			if ( kCapacity == count ) {
+				count = 0;
+				result.add( station );
+				station = new IHRStation();
+			}
+		} while ( start > 0 );
+		
+		return result;
+	}
+	
+	public static String toString( List inStations ) {
+		StringBuilder			result = new StringBuilder();
+		int						index , count = ( null == inStations ) ? 0 : inStations.size();
+		
+		result.ensureCapacity( count * 256 );
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			IHRStation			station = (IHRStation)inStations.get( index );
+			
+			for ( int i = 0 ; i < kCapacity ; ++i ) {
+				String			string = station.get( i );
+				
+				result.append( ( null == string ) ? "" : string );
+				result.append( '\n' );
+			}
+		}
+		
+		return result.toString();
+	}
+	
+}

@@ -1,0 +1,67 @@
+package com.troubadorian.streamradio.client.model;
+
+import java.util.List;
+
+import android.content.Context;
+import android.content.Intent;
+import android.util.Log;
+import android.widget.SimpleCursorAdapter;
+
+import com.troubadorian.streamradio.controller.R;
+
+public class IHROneLineCursor extends IHRSimpleCursor {
+	final String[]				kColumns = { "line1" };
+	final int[]					kColumnsID = { R.id.StationsListRowTextLine1 };
+	final int					kResourceID = R.layout.list_row_single_line;
+	
+	public List					mContents;
+	
+	public void setContents( List list ) {
+		mContents = list;
+		mCursorCount = ( null == list ) ? 0 : list.size();
+	}
+	
+	public void prepareIntent( Intent intent ) { prepareIntent( intent , mCursorIndex ); }
+	
+	public void prepareIntent( Intent intent , int index ) {
+		if ( index >= 0 && index < mCursorCount ) {
+			String				string = (String)mContents.get( mCursorIndex );
+			
+			intent.putExtra( "station" , string );
+		}
+	}
+	
+	public String getStringForIndex( int inColumn , int inIndex ) {
+		String					result = null;
+		
+		if ( inIndex >= 0 && inIndex < mCursorCount ) {
+			result = ( 0 == inColumn ) ? (String)mContents.get( inIndex ) : null;
+		}
+		
+		return result;
+	}
+	
+	@Override
+	public String getString( int arg0 ) {
+	    if (getStringForIndex(arg0, mCursorIndex) != null) {
+		return getStringForIndex( arg0 , mCursorIndex );
+	    }
+	    else
+	    {
+	    Log.d(this.getClass().getSimpleName(), "------------------------------------" + mCursorIndex + "int : " + arg0);
+	    return "Not Found";
+	    }
+		
+	}
+	
+	@Override
+	public int getColumnCount() { return kColumns.length; }
+	@Override
+	public int getColumnIndex( String arg0 ) { return getColumnIndexIn( arg0 , kColumns ); }
+	@Override
+	public String getColumnName( int arg0 ) { return ( arg0 >= 0 && arg0 < kColumns.length ) ? kColumns[arg0] : null; }
+	@Override
+	public String[] getColumnNames() { return kColumns; }
+	
+	public SimpleCursorAdapter newAdapter( Context inContext ) { return new SimpleCursorAdapter( inContext , kResourceID , this , kColumns , kColumnsID ); }
+}

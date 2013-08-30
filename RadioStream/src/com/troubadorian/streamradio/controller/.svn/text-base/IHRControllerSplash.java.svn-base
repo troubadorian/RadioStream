@@ -1,0 +1,146 @@
+package com.clearchannel.iheartradio.controller;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.os.Bundle;
+
+import com.clearchannel.iheartradio.android.model.IHRConfigurationClient;
+import com.clearchannel.iheartradio.android.model.IHRPlatform;
+import com.clearchannel.iheartradio.android.view.IHRViewSplash;
+
+public class IHRControllerSplash extends IHRController implements Runnable {
+	public IHRViewSplash			mViewSplash;
+	
+	public boolean					mAcquired;
+	public boolean					mSplashShown;
+	
+	@Override
+	protected void onCreate( Bundle inState ) {
+		super.onCreate( inState );
+		
+		setContentView( mViewSplash = new IHRViewSplash( this ) );
+		
+		if ( null != inState ) {
+			restoreState( inState );
+		}
+	}
+	
+	@Override
+	protected void onResume() {
+		super.onResume();
+		
+		IHRConfigurationClient.shared().setDelegate( this );
+		
+		if ( !mSplashShown ) {
+			mSplashShown = true;
+			IHRConfigurationClient.shared().splashShown();
+		}
+	}
+	
+	@Override
+	protected void onDestroy() {
+		IHRConfigurationClient.shared().setDelegate( null );
+		
+		super.onDestroy();
+	}
+	
+	protected void restoreState( Bundle inState ) {
+		mSplashShown = inState.getBoolean( "iheartradio.splash_shown" );
+		mViewSplash.mStatus.setText( inState.getCharSequence( "iheartradio.splash_status" ) );
+	}
+	
+	@Override
+	protected void onSaveInstanceState( Bundle ioState ) {
+		super.onSaveInstanceState( ioState );
+		
+		ioState.putBoolean( "iheartradio.splash_shown" , mSplashShown );
+		ioState.putCharSequence( "iheartradio.splash_status" , mViewSplash.mStatus.getText() );
+	}
+	
+	public void updateStatus( String inStatus ) {
+		mViewSplash.mStatus.setText( inStatus );
+	}
+	
+	public void run() {
+		if ( mAcquired ) {
+			finish();
+		}
+	}
+	
+	public void configurationAcquired( boolean inOffline ) {
+		setResult( inOffline ? Activity.RESULT_FIRST_USER : Activity.RESULT_OK );
+		
+		if ( mViewSplash.mAnimating ) {
+			mAcquired = true;
+		} else {
+			finish();
+		}
+	}
+	
+	public void configurationQuerying() {
+		mAcquired = false;
+		mViewSplash.animateLogo();
+	}
+	
+	public abstract class SplashDialog extends IHRAlert {
+		public SplashDialog( String inMessage , String inButton1 , String inButton2 , String inButton3 ) { super( inMessage , inButton1 , inButton2 , inButton3 ); }
+		@Override
+		public void onCancel( DialogInterface inDialog ) { cease(); /*onClick( AlertDialog.BUTTON_NEGATIVE );*/ }
+	}
+	
+	public void askConfiguration() {
+		new SplashDialog( "Choose configuration files to request from server:" , "Production" , IHRPlatform.isBeingDebugged() ? "Dev" : null , "Staging" ) {
+			@Override public void onClick( int inButton ) { IHRConfigurationClient.shared().configurationBegin( 4 + inButton ); }
+		};
+	}
+	
+	public void askOptimization() {
+		//	xkKeyDontWarnAboutOptimalUsage
+		new SplashDialog( "For optimal performance please close other applications before running iheartradio." , "OK" , null , "Dont Show Again" ) {
+			@Override public void onClick( int inButton ) { IHRConfigurationClient.shared().configurationOptimized( inButton == AlertDialog.BUTTON_NEUTRAL ? 1 : 0 ); }
+		};
+	}
+	
+	public void askContinue() {
+		new SplashDialog( "Cannot fetch configuration files. You may have a problem with your network. Continue trying?" , "Yes" , "No" , null ) {
+			@Override public void onClick( int inButton ) { IHRConfigurationClient.shared().configurationContinue( inButton == AlertDialog.BUTTON_POSITIVE ? 0 : 1 ); }
+		};
+	}
+	
+	public void askUpdate( boolean inForced , String inMessage ) {
+		if ( null == inMessage || 0 == inMessage.length() ) {
+			inMessage = ( inForced ) ? "An update is available." : "An update is available.  Would you like to download it?";
+		}
+		
+		new SplashDialog( inMessage , "Update now" , inForced ? "Quit" : null , inForced ? null : "Ignore" ) {
+			@Override public void onClick( int inButton ) { IHRConfigurationClient.shared().configurationUpdate( inButton - AlertDialog.BUTTON_NEUTRAL ); }
+		};
+	}
+	//Code changed by sriram for handling the LOcation popup dialog -- 08-20-2010
+	/*public void askLocationDialog() {
+		new SplashDialog( "iheartradio would like to use Your Current Location" , "Don't Allow" , null , "OK" ) {
+			@Override public void onClick( int inButton ) { IHRConfigurationClient.shared().configurationOptimized( inButton == AlertDialog.BUTTON_NEUTRAL ? 0 : 1 ); }
+		};		
+	}
+	*/
+	//Code ends here 	
+	public void informFinished() {
+		new SplashDialog( "Unable to continue." , "Quit" , null , null ) {
+			@Override public void onClick( int inButton ) { cease(); }
+		};
+	}
+	
+	public void informNoNetwork() {
+		new SplashDialog( "No network connection is currently available. Please try again when a network connection is available." , "Quit" , null , null ) {
+			@Override public void onClick( int inButton ) { cease(); }
+		};
+	}
+	//Code changed on 09-21-2010
+	public void informNoGPS() {
+		new SplashDialog( "No gps connection is currently available. Please try again when a gps connection is available." , "Quit" , null , null ) {
+			@Override public void onClick( int inButton ) { cease(); }
+		};
+	}
+	//Code ends here 	
+}

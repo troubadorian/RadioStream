@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	android:layout_width="fill_parent"
+	android:layout_height="44px">
+
+	<TextView
+		android:id="@+id/StationsListRowTextLine1"
+		android:layout_width="fill_parent"
+		android:layout_height="26px"
+		android:layout_marginLeft="2px"
+		android:layout_marginRight="2px"
+
+		android:ellipsize="end"
+		android:singleLine="true"
+		android:textColor="#ffffffff"
+		android:textSize="20px"
+		android:typeface="sans"
+	/>
+
+	<TextView
+		android:id="@+id/StationsListRowTextLine2"
+		android:layout_width="fill_parent"
+		android:layout_height="16px"
+		android:layout_marginLeft="6px"
+		android:layout_marginRight="2px"
+		android:layout_marginTop="24px"
+
+		android:ellipsize="end"
+		android:singleLine="true"
+		android:textColor="#ffaaaaaa"
+		android:textSize="12px"
+		android:typeface="sans"
+	/>
+</RelativeLayout>

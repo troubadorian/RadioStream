@@ -1,0 +1,137 @@
+package com.clearchannel.iheartradio.android.model;
+
+import java.io.DataInputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.InflaterInputStream;
+
+import com.clearchannel.iheartradio.model.IHRHTTPConnectionBase;
+
+abstract public class IHRHTTPConnection extends IHRHTTPConnectionBase {
+	public IHRHTTPConnection( String url, byte[] postData ) { super( url, postData ); }
+	
+	@Override
+	protected void closeConnection() {
+		try { if ( mConnection != null ) ((HttpURLConnection) mConnection).disconnect(); } catch ( Exception e ) { }
+		
+		mConnection = null;
+	}
+	
+	@Override
+	protected void createConnection( String url ) throws Exception {
+		try {
+			mConnection = new URL( url ).openConnection();
+			
+//			((HttpURLConnection) mConnection).setDoInput( true );
+//			((HttpURLConnection) mConnection).setDoOutput( true );
+			
+//			setRequestMethod( "GET" );
+		} catch ( Exception e ) {
+			throw new Exception( e.getMessage() );
+		}
+	}
+	
+	@Override
+	protected String getHeaderField( String key ) throws Exception {
+		return ((HttpURLConnection) mConnection).getHeaderField( key );
+	}
+
+	@Override
+	protected int getHeaderFieldInt( String key, int defaultValue ) throws Exception {
+		return ((HttpURLConnection) mConnection).getHeaderFieldInt( key, defaultValue );
+	}
+
+	@Override
+	protected String getHeaderFieldKey( int index ) throws Exception {
+		return ((HttpURLConnection) mConnection).getHeaderFieldKey( index );
+		
+		/*
+		Map<String, List<String>>	headers;
+		String						key;
+		Iterator<String>			keys;
+		
+		headers = ((HttpURLConnection) mConnection).getHeaderFields();
+		keys = headers.keySet().iterator();
+
+		for ( key = null; index >= 0 && keys.hasNext(); --index, key = keys.next() ) ;
+
+		return index < 0 ? key : null;
+		*/
+	}
+	
+/*
+	protected IHRHashtable getHeaderFields() throws Exception {
+		IHRHashtable				hash;
+		Map<String, List<String>>	headers;
+		String						key, value;
+		Iterator<String>			keys;
+		
+		hash = new IHRHashtable();
+		headers = ((HttpURLConnection) mConnection).getHeaderFields();
+		keys = headers.keySet().iterator();
+
+		while ( keys.hasNext() ) {
+			key = keys.next();
+			value = headers.get( key ).get( 0 );
+
+			hash.put( key, value );
+		}
+		
+		return hash;
+	}
+*/
+	
+	@Override
+	protected OutputStream getOutputStream() throws Exception {
+		return ((HttpURLConnection) mConnection).getOutputStream();
+	}
+
+	@Override
+	protected int getResponseCode() throws Exception {
+		return ((HttpURLConnection) mConnection).getResponseCode();
+	}
+	
+/*
+	protected String getResponseMessage() throws Exception {
+		return ((HttpURLConnection) mConnection).getResponseMessage();
+	}
+*/
+
+	@Override
+	protected void openConnection() throws Exception {
+		((HttpURLConnection) mConnection).connect();
+	}
+	
+	@Override
+	protected void openInputStream() throws Exception {
+		InputStream				compressed = null;
+		
+		mInputStream = ((HttpURLConnection) mConnection).getInputStream();
+		
+		if ( mCompressionType == kCompressionTypeDeflate ) {
+			compressed = new DataInputStream( new InflaterInputStream( mInputStream ) );
+		} else if ( mCompressionType == kCompressionTypeGZip ) {
+			compressed = new DataInputStream( new GZIPInputStream( mInputStream ) );
+		}
+		
+		if ( compressed != null ) {
+			mInputStreamCompressed = mInputStream;
+			mInputStream = compressed;
+		}
+
+		return;
+	}
+	
+	@Override
+	protected void setRequestMethod( String method ) throws Exception {
+		((HttpURLConnection) mConnection).setRequestMethod( method );
+	}
+	
+	@Override
+	protected void setRequestProperty( String property, String value ) throws Exception {
+		((HttpURLConnection) mConnection).setRequestProperty( property, value );
+	}
+}

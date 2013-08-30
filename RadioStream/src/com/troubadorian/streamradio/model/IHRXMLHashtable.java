@@ -1,0 +1,27 @@
+package com.troubadorian.streamradio.model;
+
+import java.io.IOException;
+
+import javax.xml.parsers.ParserConfigurationException;
+
+import org.xml.sax.SAXException;
+
+import com.troubadorian.streamradio.client.model.IHRHashtable;
+
+public class IHRXMLHashtable extends IHRXMLParser {
+	protected IHRHashtable			mHashtable;
+	
+	public IHRXMLHashtable( byte[] inXML ) throws IOException, SAXException, ParserConfigurationException {
+		super( inXML );
+	}
+	
+	@Override
+	public void parseEnter() { mHashtable = new IHRHashtable(); super.parseEnter(); }
+	
+	@Override
+	public void endElement( String uri, String localName, String qName ) {
+		if ( localName == null || mContents == null ) return;
+
+		mHashtable.put( localName, mContents );
+	}
+}

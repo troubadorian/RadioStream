@@ -1,0 +1,147 @@
+package com.clearchannel.iheartradio.android.services;
+
+import java.io.IOException;
+
+import javax.xml.parsers.ParserConfigurationException;
+
+import org.xml.sax.SAXException;
+
+import com.clearchannel.iheartradio.android.model.IHRHashtable;
+import com.clearchannel.iheartradio.android.model.IHRVector;
+import com.clearchannel.iheartradio.model.IHRXMLParser;
+
+public class IHRConfigurationStartup extends IHRXMLParser {
+	public int							mAdsBannerRefreshInterval;
+	public String						mAdsDartURLPrefix;
+	public int                          mAdsGatewayDisplayTime;
+	public boolean                      mAdsGatewayEnableUserAbort;
+	public int                          mAdsGatewayInterval;
+	public int                          mAdsGatewayListenSeconds;
+	public IHRHashtable					mAdsPagePositions;
+	public String                       mAdsSplashDartURL;
+	public int                          mAdsSplashDisplayTime;
+	
+	public boolean                      mAndroidAutoupdateEnabled;
+	public boolean                      mAndroidAutoupdateForced;
+	public String                       mAndroidAutoupdateMessage;
+	public int                          mAndroidAutoupdateWarnInterval;
+	public String                       mAndroidUpdateURL;
+	public String                       mAndroidVersion;
+	
+	public String                       mCitiesVersion;
+	public IHRVector                    mFeatured;
+	public String                       mFormatsVersion;
+	public String                       mPremiumVersion;
+	public String                       mMediaVaultURL;
+	public String                       mStationListVersion;
+
+	protected boolean                   mReadingFeatured;
+	
+	public IHRConfigurationStartup( byte[] inBytes ) throws IOException, SAXException, ParserConfigurationException {
+		super( inBytes );
+	}
+	
+	@Override
+	public void parseEnter() {
+		mAdsPagePositions = new IHRHashtable();
+		mFeatured = new IHRVector();
+		mReadingFeatured = false;
+	}
+	
+	@Override
+	public void parseLeave() {
+		// limit the amount of time a large player ad can be shown without
+		// auto-closing (this implies there is no close box).  This prevents
+		// the ui from becoming inadvertently inaccessible.
+		if ( mAdsGatewayDisplayTime > 10 ) mAdsGatewayDisplayTime = 10;	
+	}
+	
+	@Override
+	public void endElement( String localName ) {
+		if ( localName.equals( "ads_banner_refresh_interval" ) ) {
+			mAdsBannerRefreshInterval = Integer.parseInt( mContents );
+		} else if ( localName.equals( "ads_dart_url_prefix" ) ) {
+			mAdsDartURLPrefix = mContents;
+		} else if ( localName.equals( "ads_gateway_display_time" ) ) {
+			mAdsGatewayDisplayTime = Integer.parseInt( mContents );
+		} else if ( localName.equals( "ads_gateway_enable_user_abort" ) ) {
+			mAdsGatewayEnableUserAbort = mContents.equals( "1" );
+		} else if ( localName.equals( "ads_gateway_interval" ) ) {
+			mAdsGatewayInterval = Integer.parseInt( mContents );
+		} else if ( localName.equals( "ads_gateway_listen_seconds" ) ) {
+			mAdsGatewayListenSeconds = Integer.parseInt( mContents );
+		} else if ( localName.equals( "ads_splash_dart_url" ) ) {
+			mAdsSplashDartURL = mContents;
+		} else if ( localName.equals( "ads_splash_display_time" ) ) {
+			mAdsSplashDisplayTime = Integer.parseInt( mContents );
+		} else if ( localName.equals( "android_application_update_url" ) ) {
+			mAndroidUpdateURL = mContents;
+		} else if ( localName.equals( "android_autoupdate_enabled" ) ) {
+			mAndroidAutoupdateEnabled = mContents.equals( "1" );
+		} else if ( localName.equals( "android_autoupdate_forced" ) ) {
+			mAndroidAutoupdateForced = mContents.equals( "1" );
+		} else if ( localName.equals( "android_autoupdate_message" ) ) {
+			mAndroidAutoupdateMessage = mContents;
+		} else if ( localName.equals( "android_application_version" ) ) {
+			mAndroidVersion = mContents;
+		} else if ( localName.equals( "android_autoupdate_warn_interval" ) ) {
+			if ( ( mAndroidAutoupdateWarnInterval = Integer.parseInt( mContents ) ) < 1 ) {
+				mAndroidAutoupdateWarnInterval = 1;
+			}
+		} else if ( localName.equals( "call_letters" ) ) {
+			if ( mReadingFeatured ) {
+				mFeatured.addElement( mContents );
+			}
+		} else if ( localName.equals( "cities_version" ) ) {
+			mCitiesVersion = mContents;
+		} else if ( localName.equals( "featured" ) ) {
+			mReadingFeatured = false;
+		} else if ( localName.equals( "formats_version" ) ) {
+			mFormatsVersion = mContents;
+		} else if ( localName.equals( "premium_version" ) ) {
+			mPremiumVersion = mContents;
+		} else if ( localName.equals( "mediavault_url_droid" ) ) {
+			mMediaVaultURL = mContents;
+		} else if ( localName.equals( "page_pos_click_banner" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "page_pos_click_player_large" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "page_pos_click_player_small" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "page_pos_click_stream" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "page_pos_impression_banner" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "page_pos_impression_banner_secondary" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "page_pos_impression_player_large" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "page_pos_impression_player_small" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "page_pos_impression_splash" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "page_pos_impression_stream" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "page_pos_request_banner" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "page_pos_request_player" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "page_pos_request_splash" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "page_pos_request_stream" ) ) {
+			mAdsPagePositions.put( localName, mContents );
+		} else if ( localName.equals( "station_list_version" ) ) {
+			mStationListVersion = mContents;
+		}
+	}
+	
+	@Override
+	public void startElement( String name ) {
+		mContents = "";
+		
+		if ( name.equals( "featured" ) ) {
+			mReadingFeatured = true;
+		}
+	}
+	
+}

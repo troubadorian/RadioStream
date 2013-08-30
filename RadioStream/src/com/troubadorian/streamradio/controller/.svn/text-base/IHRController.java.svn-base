@@ -1,0 +1,197 @@
+package com.clearchannel.iheartradio.controller;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Context;
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.DialogInterface.OnCancelListener;
+import android.content.DialogInterface.OnClickListener;
+import android.content.res.Configuration;
+import android.os.Bundle;
+import android.os.IBinder;
+import android.util.Log;
+import android.view.KeyEvent;
+import android.view.View;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.Toast;
+
+import com.clearchannel.iheartradio.model.IHRObject;
+
+public class IHRController extends IHRObject {
+	//	consider as private to IHRControllerActivity
+	protected Intent			mCreationIntent;
+	protected Activity			mControllerActivity;	//	only valid from onCreate to onDestroy
+	
+	//	consider as protected to IHRController
+	protected String			mIdentifier;
+	protected View				mContent;
+	protected int				mResult;
+	
+	public View content() { return mContent; }
+	public String identifier() { return mIdentifier; }
+	public Intent getIntent() { return mCreationIntent; }
+	public Activity getContext() { return mControllerActivity; }
+	public IHRControllerActivity activity() { return (IHRControllerActivity)mControllerActivity; }
+	
+	/*
+	 * mControllerActivity and mCreationIntent should
+	 * never be modified and are only valid from the
+	 * start of onCreate to the end of onDestroy
+	 * 
+	 * in onCreate call setContentView
+	 * read any state from inState
+	 * 
+	 * in onSaveInstanceState save state for onCreate
+	 * 
+	 * in onNewIntent parse arguments sent
+	 * from caller of startController
+	 * 
+	 * use startController to push a new controller
+	 * add class and arguments to intent
+	 * 
+	 * use finish to pop self from stack
+	 * 
+	 * use beingShown and afterShown to tell
+	 * when content view is being displayed
+	 * due to controller changes
+	 * 
+	 * use onResume and onPause to tell
+	 * when whole activity is being displayed
+	 * 
+	 * the onXXX methods are called for all controllers
+	 * in the stack not just the current controller
+	 * 
+	 * the onXXX are called either when a controller
+	 * is created or destroyed or when the activity
+	 * receives the calls from the system
+	 * 
+	 * */
+	
+	protected void prepareView() {}
+	
+	//	consider as private to IHRControllerActivity
+	protected void onNewIntent( Intent intent ) {}
+	protected void onCreate( Bundle inState ) { prepareView(); }
+	protected void onRestart() {}
+	protected void onStart() {}
+	protected void onPostCreate( Bundle inState ) {}
+	protected void onRestoreInstanceState( Bundle inState ) {}
+	protected void onResume() {}
+	protected void onPostResume() {}
+	protected void onUserLeaveHint() {}
+	protected void onPause() {}
+	protected void onStop() {}
+	protected void onDestroy() { mContent.setVisibility( View.GONE ); mContent = null; }
+	protected void onSaveInstanceState( Bundle ioState ) {}
+	protected void onConfigurationChanged( Configuration c ) {}
+	public boolean onKeyDown( int keyCode , KeyEvent event ) { return false; }
+	
+	public int getResult() { return mResult; }
+	public void setResult( int inResult ) { mResult = inResult; }
+	
+	public void startController( Intent intent ) { activity().pushControllerIntent( intent ); }
+	public void startControllerForResult( Intent intent , int inUnique ) { activity().pushControllerForResult( intent , inUnique ); }
+	public void finish() { 
+		if (null != activity()) {
+			activity().popController( this );
+		} 
+	}
+//	public void finishController( int inUnique ) { activity().popControllerWithCode( inUnique ); }
+	public void runOnUiThread( Runnable inRun ) { activity().runOnUiThread( inRun ); }
+	public void setContentView( View inView ) { mContent = inView; }
+	public void setContentView( int inID ) { mContent = inflateLayout( inID ); }
+	public View inflateLayout( int inID ) { return activity().getLayoutInflater().inflate( inID , null ); }
+	public View findViewById( int inID ) { return ( null == mContent ) ? null : mContent.findViewById( inID ); }
+	
+	public boolean wantsBanner() { return true; }
+	
+	/*
+	 * called before content() shown or hidden by IHRControllerActivity
+	 * */
+	public void beingShown( boolean inShown ) { /*mContent.setVisibility( inShown ? View.VISIBLE : View.GONE );*/ }
+	
+	/*
+	 * called after content() shown or hidden by IHRControllerActivity
+	 * */
+	public void afterShown( boolean inShown ) {}
+	
+	public void showKeyboard( int inFlags ) {
+		InputMethodManager		manager = (InputMethodManager)activity().getSystemService( Activity.INPUT_METHOD_SERVICE );
+//		WindowManager			manager = (WindowManager)activity().getSystemService( Activity.WINDOW_SERVICE );
+//		IBinder					window = ( null == mContent ) ? null : mContent.getWindowToken();
+		
+//		if ( null != mContent ) manager.showSoftInput( mContent , inFlags );
+//		if ( null != window ) manager.showSoftInputFromInputMethod( window , inFlags );
+		
+//		if ( null != window ) manager.toggleSoftInputFromWindow( window , inFlags , InputMethodManager.HIDE_IMPLICIT_ONLY );
+		manager.toggleSoftInput( inFlags , InputMethodManager.HIDE_IMPLICIT_ONLY );
+		
+//		window.setSoftInputMode( WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE );
+	}
+	
+	public void hideKeyboard( int inFlags ) {
+		InputMethodManager		manager = (InputMethodManager)activity().getSystemService( Activity.INPUT_METHOD_SERVICE );
+		IBinder					window = ( null == mContent ) ? null : mContent.getWindowToken();
+		
+		if ( null != window ) manager.hideSoftInputFromWindow( window , inFlags );
+	}
+	
+	public abstract class IHRAlert extends AlertDialog implements OnClickListener, OnCancelListener {
+		public IHRAlert() { super( activity() ); }
+		public IHRAlert( Context inContext ) { super( activity() ); }
+		public IHRAlert( String inMessage , String inButton1 , String inButton2 , String inButton3 ) { super( activity() ); prepare( inMessage , inButton1 , inButton2 , inButton3 ); show(); }
+		public void cease() { setResult( Activity.RESULT_CANCELED ); finish(); }
+		public void onClick( DialogInterface inDialog , int inButton ) { inDialog.dismiss(); onClick( inButton ); }
+		public void onCancel( DialogInterface inDialog ) { cease(); onClick( AlertDialog.BUTTON_NEGATIVE ); }
+		public abstract void onClick( int inButton );
+		
+		public void prepare( CharSequence inMessage , CharSequence inButton1 , CharSequence inButton2 , CharSequence inButton3 ) {
+			setMessage( inMessage );
+			
+			if ( null != inButton1 ) setButton( AlertDialog.BUTTON_POSITIVE , inButton1 , this );
+			if ( null != inButton2 ) setButton( AlertDialog.BUTTON_NEGATIVE , inButton2 , this );
+			if ( null != inButton3 ) setButton( AlertDialog.BUTTON_NEUTRAL , inButton3 , this );
+			
+			setOnCancelListener( this );
+			setCancelable( null == inButton3 );
+			setCanceledOnTouchOutside( null == inButton3 && null == inButton1 );
+			setOwnerActivity( activity() );
+		}
+	}
+	
+	public class IHRIgnoreAlert extends IHRAlert {
+		public IHRIgnoreAlert( String inMessage , String inButton ) { super( inMessage , null , inButton , null ); }
+		@Override
+		public void onClick( int inButton ) {}
+	}
+	
+	public void debugLog( String inMethod , String inLog ) {
+		Log.d( "::: UI" , this.getClass().getSimpleName() + ":" + inMethod + inLog );
+	}
+//Code added by sriram for handling the message alert
+	public void MessageAlert(String messg,String button1,String button2)
+	{
+		System.out.println("Inside Message Alert");
+		AlertDialog.Builder builder = new AlertDialog.Builder(this.mControllerActivity);
+		builder.setMessage(messg)
+		       .setCancelable(false)
+		       .setPositiveButton(button1, new DialogInterface.OnClickListener() {
+		           public void onClick(DialogInterface dialog, int id) {
+		        	   mControllerActivity.finish();
+		           }
+		       })
+		       .setNegativeButton(button2, new DialogInterface.OnClickListener() {
+		           public void onClick(DialogInterface dialog, int id) {
+		                dialog.cancel();
+		           }
+		       });
+		AlertDialog alert = builder.create();
+		alert.show();
+	}
+
+	public void showToast(String msg) {
+	    Toast.makeText(activity(), msg, Toast.LENGTH_LONG).show();
+	}
+//Code ends here 	
+}

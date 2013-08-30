@@ -1,0 +1,168 @@
+package com.troubadorian.streamradio.model;
+
+import android.util.Log;
+
+import com.troubadorian.streamradio.client.model.IHRHashtable;
+import com.troubadorian.streamradio.client.model.IHRThreadable;
+import com.troubadorian.streamradio.client.model.IHRVector;
+
+public class IHRBroadcaster {
+	private static IHRBroadcaster	sCommon = null;
+	
+	public static final String		kNotifyEveryName = null;
+	public static final String		kRemoveEveryName = null;
+	public static final IHRListener	kRemoveEveryListener = null;
+	
+	protected IHRHashtable			mListeners;
+	
+	//**
+	protected IHRThreadable			mThreadable;
+	
+	public IHRBroadcaster( IHRThreadable inThreadable ) {
+		mThreadable = inThreadable;
+	}
+	
+	public static IHRBroadcaster common() {
+		if ( null == sCommon ) sCommon = new IHRBroadcaster( null );
+		
+		return sCommon;
+	}
+	/*/
+	public static IHRBroadcaster common() {
+		if ( null == sCommon ) sCommon = new IHRBroadcaster();
+		
+		return sCommon;
+	}
+	/**/
+	
+	public void listenFor( String inName , IHRListener inListener ) {
+		IHRVector			listeners = null;
+		
+		if ( null == inName ) inName = "";	//	listen for all
+		
+		if ( null == mListeners ) mListeners = new IHRHashtable();
+		else listeners = (IHRVector)mListeners.get( inName );
+		
+		if ( null == listeners ) {
+			listeners = new IHRVector();
+			listeners.add( inListener );
+			mListeners.put( inName , listeners );
+		} else if ( !listeners.contains( inListener ) ) {
+			listeners.add( inListener );
+		}
+	}
+	
+	public void removeFor( String inName , IHRListener inListener ) {
+		IHRVector			listeners = null;
+		
+		if ( null == mListeners ) {
+		} else if ( null == inName ) {
+//**
+			for ( Object value : mListeners.values() ) {
+				listeners = (IHRVector)value;
+/*/
+			for ( Enumeration list = mListeners.elements() ; list.hasMoreElements() ; ) {
+				listeners = (IHRVector)list.nextElement();
+/**/
+				
+				if ( null == inListener ) listeners.clear();
+				else listeners.removeElement( inListener );
+			}
+			
+			if ( null == inListener ) mListeners.clear();
+		} else if ( null == inListener ) {
+			mListeners.remove( inName );
+		} else {
+			listeners = (IHRVector)mListeners.get( inName );
+			
+			if ( null != listeners ) {
+				listeners.removeElement( inListener );
+			}
+		}
+	}
+	
+	public void notifyFor( String inName , IHRHashtable inDetails ) {
+		IHRVector			listeners = null;
+		
+		if ( null == mListeners ) {
+		} else if ( null == inName ) {
+//**
+			for ( Object value : mListeners.values() ) {
+				listeners = (IHRVector)value;
+/*/
+			for ( Enumeration list = mListeners.elements() ; list.hasMoreElements() ; ) {
+				listeners = (IHRVector)list.nextElement();
+/**/
+				
+				broadcast( listeners , inName , inDetails );
+			}
+		} else {
+			listeners = (IHRVector)mListeners.get( inName );
+			
+			if ( null != listeners ) {
+				broadcast( listeners , inName , inDetails );
+			}
+			
+			listeners = inName.equals( "" ) ? null : (IHRVector)mListeners.get( "" );
+			
+			if ( null != listeners ) {
+				broadcast( listeners , inName , inDetails );
+			}
+		}
+	}
+	
+	public class Notification implements Runnable {
+		public String			mName;
+		public IHRHashtable		mDetails;
+		
+		public Notification( String inName , IHRHashtable inDetails ) { mName = inName; mDetails = inDetails; }
+		public void run() { notifyFor( mName , mDetails ); }
+	}
+	
+	public void notifyOnMainThread( String inName , IHRHashtable inDetails , boolean inWait ) {
+		Notification			notification = new Notification( inName , inDetails );
+		
+		//**
+		IHRThreadable			threadable = null == mThreadable ? IHRThreadable.gMain : mThreadable;
+		
+		if ( null == threadable || threadable.isCurrent() ) notification.run();
+		else if ( inWait ) threadable.handleWaiting( notification , 0 , -1 );
+		else threadable.handle( notification );
+		/*/
+		UiApplication			application = UiApplication.getUiApplication();
+		
+		if ( null == application || application.isEventThread() ) notification.run();
+		else if ( inWait ) application.invokeAndWait( notification );
+		else application.invokeLater( notification );
+		/**/
+	}
+	
+	public void notifyOnMainThread( String inName , IHRHashtable inDetails ) {
+		notifyOnMainThread( inName , inDetails , false );
+	}
+	
+	public void debugLog( String inMethod , String inMessage ) {
+		//**
+		Log.d( "== " + inMethod , inMessage );
+		/*/
+		System.out.print( "== " + inMethod + " " + inMessage + "\n" );
+		/**/
+	}
+	
+	private void broadcast( IHRVector inListeners , String inName , IHRHashtable inDetails ) {
+		int					index , count = ( null == inListeners ) ? 0 : inListeners.size();
+		
+		for ( index = 0 ; index < count ; ++index ) {
+			IHRListener		listener = (IHRListener)inListeners.get( index );
+			
+//			debugLog( "broadcast" , inName + " to " + listener.getClass().getName().substring( listener.getClass().getName().lastIndexOf( '.' ) + 1 ) + " " + IHRUtilities.description( inDetails ) );
+			
+			try {
+				listener.listen( inName , inDetails );
+			} catch ( Exception e ) {
+				debugLog( "broadcast" , inName + " " + Thread.currentThread().getName() + " " + e.getClass().getName().substring( e.getClass().getName().lastIndexOf( '.' ) + 1 ) + " " + e.toString() + " " + IHRUtilities.description( inDetails ) );
+			}
+		}
+	}
+	
+}

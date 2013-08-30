@@ -1,0 +1,74 @@
+package com.troubadorian.streamradio.model;
+
+import android.os.Handler;
+
+
+
+
+public class IHRAnimator implements Runnable {
+	/**
+	public void run() {}
+	/*/
+	protected int						mDurationMs;
+	protected Handler					mHandler;
+	protected int						mStepIntervalMs;
+	protected Thread					mThread;
+
+	protected static final int			kDefaultAnimationStepIntervalMs = 1000 / 24;
+	
+	public static final int				kMessageAnimationStarted	=	IHRUtilities.osType( "Ani0" );
+	public static final int				kMessageAnimationStepped	=	IHRUtilities.osType( "Ani1" );
+	public static final int				kMessageAnimationStopped	=	IHRUtilities.osType( "Ani2" );
+	
+	public IHRAnimator( Handler.Callback delegate ) {
+		mHandler = new Handler( delegate );
+	}
+	
+	public Thread start() { return start( kDefaultAnimationStepIntervalMs, 0 ); }
+	public Thread start( int durationMs ) { return start( kDefaultAnimationStepIntervalMs, durationMs ); }
+	
+	public synchronized Thread start( int stepIntervalMs, int durationMs ) {
+		mDurationMs = durationMs;
+		mStepIntervalMs = stepIntervalMs;
+		mThread = new Thread( this , "IHRAnimator " + ( durationMs / 1000 ) );
+		mThread.start();
+		
+		return mThread;
+	}
+	
+	public synchronized void stop() { mThread = null; }
+	
+	public void run() {
+		int						durationMs, elapsed, stepIntervalMs;
+		long					startTime;
+		Thread					thread;
+		
+		thread = Thread.currentThread();
+		
+		synchronized( this ) {
+			if ( mThread != thread ) return;
+			
+			durationMs = mDurationMs;
+			stepIntervalMs = mStepIntervalMs;
+		}
+
+		startTime = System.currentTimeMillis();
+
+		mHandler.sendMessage( mHandler.obtainMessage( kMessageAnimationStarted, thread ) );
+
+		for ( ;; ) {
+			synchronized( this ) { if ( mThread != thread ) return; }
+
+			elapsed = (int)( System.currentTimeMillis() - startTime );
+
+			mHandler.sendMessage( mHandler.obtainMessage( kMessageAnimationStepped, elapsed, 0, thread ) );
+			
+			if ( durationMs > 0 && elapsed >= durationMs ) break;
+
+			try { Thread.sleep( stepIntervalMs ); } catch ( Exception e ) { }
+		}
+
+		mHandler.sendMessage( mHandler.obtainMessage( kMessageAnimationStopped, thread ) );
+	}
+	/**/
+}

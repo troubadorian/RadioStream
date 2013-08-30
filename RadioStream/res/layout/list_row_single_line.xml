@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RelativeLayout xmlns:android='http://schemas.android.com/apk/res/android'
+	android:layout_width='fill_parent'
+	android:layout_height='36px'>
+	
+	<ImageView
+		android:id='@+id/OneLineRowChevron'
+		android:src='@drawable/chevron'
+		
+		android:layout_alignParentRight='true'
+		android:layout_centerVertical='true'
+		android:layout_height='wrap_content'
+		android:layout_width='wrap_content'
+		android:layout_marginRight='8px'
+	/>
+	
+	<TextView
+		android:id='@+id/StationsListRowTextLine1'
+		android:layout_centerVertical='true'
+		android:layout_height='wrap_content'
+		android:layout_width='fill_parent'
+		android:layout_marginLeft='2px'
+		android:layout_marginRight='8px'
+		android:layout_toLeftOf='@id/OneLineRowChevron'
+		
+		android:text='foo bar'
+		android:ellipsize='end'
+		android:singleLine='true'
+		android:textColor='#FFFFFFFF'
+		android:textSize='20px'
+		android:typeface='sans'
+	/>
+</RelativeLayout>

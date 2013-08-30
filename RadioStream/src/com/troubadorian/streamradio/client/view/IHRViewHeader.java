@@ -1,0 +1,240 @@
+package com.troubadorian.streamradio.client.view;
+
+import android.content.Context;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Rect;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.ImageView;
+import android.widget.RelativeLayout;
+
+import com.troubadorian.streamradio.client.model.IHRPlayerClient;
+import com.troubadorian.streamradio.controller.IHRController;
+import com.troubadorian.streamradio.controller.IHRControllerPlayer;
+import com.troubadorian.streamradio.controller.R;
+import com.troubadorian.streamradio.model.IHRAnimator;
+import com.troubadorian.streamradio.model.IHRStation;
+
+public class IHRViewHeader extends RelativeLayout implements View.OnClickListener {
+	protected IHRViewMain			mDelegate;
+	protected IHRPlayerFavorite		mFavorite;
+	protected ImageView				mLogo;
+	protected ImageView				mNowPlaying;
+	
+	protected static final int		kHeaderHeight = 45;
+	
+	public IHRViewHeader( Context context, IHRViewMain delegate ) {
+		super( context );
+		
+		mDelegate = delegate;
+		
+		setWillNotDraw( false );
+		
+		addView( mLogo = new ImageView( context ) );
+		addView( mFavorite = new IHRPlayerFavorite( context ) );
+		addView( mNowPlaying = new ImageView( context ) );
+		
+		mLogo.setImageBitmap( BitmapFactory.decodeResource( getResources(), R.drawable.android_streamradio_logo ) );
+		mNowPlaying.setImageBitmap( BitmapFactory.decodeResource( getResources(), R.drawable.now_playing ) );
+		mNowPlaying.setOnClickListener( this );
+	}
+	
+	public void onClick( View view ) {
+		if ( view != mNowPlaying ) return;
+		
+		//mDelegate.setSelectedTab( IHRViewTabBar.kTabBarButtonPlayer );
+		//Directly use the cached intent of the last controller player
+		mDelegate.pushPlayerIntent();
+
+	}
+	
+	public void showFavorite( boolean show ) {
+		String					callLetters;
+		
+		if ( show ) {
+			callLetters = IHRPlayerClient.shared().getIdentifier();
+			
+			if ( !IHRStation.canFavoriteByLetters( callLetters ) ) {
+				mFavorite.setVisibility( View.GONE );
+			} else {
+				mFavorite.setVisibility( View.VISIBLE );
+				mFavorite.setEnabled( true );
+//				mFavorite.setEnabled( ! IHRConfigurationClient.shared().isFavorite( callLetters ) );
+			}
+			
+			mNowPlaying.setVisibility( View.GONE );
+		} else {
+			mFavorite.setVisibility( View.GONE );
+			mNowPlaying.setVisibility( IHRPlayerClient.shared().isPlayRequested() ? View.VISIBLE : View.GONE );
+		}
+	}
+	
+	public void hideNowPlaying() {
+		mNowPlaying.setVisibility( View.GONE);
+	}
+
+	@Override
+	protected void onDraw( Canvas canvas ) {
+		Rect					rect = new Rect();
+		
+		rect.bottom = kHeaderHeight;
+		rect.right = getWidth();
+		
+		canvas.drawBitmap( BitmapFactory.decodeResource( getResources(), R.drawable.nav_background_1px_top ), null, rect, null );
+		
+		super.onDraw( canvas );
+	}
+	
+	@Override
+	protected void onLayout( boolean changed, int l, int t, int r, int b ) {
+		int						h, viewH, viewW, w, x, y;
+		
+		h = b - t;
+		w = r - l;
+		
+		viewH = mLogo.getDrawable().getIntrinsicHeight();
+		viewW = mLogo.getDrawable().getIntrinsicWidth();
+		
+		x = ( w - viewW ) / 2;
+		y = ( h - viewH ) / 2 - 2;	// offset up two pixels, it looks better
+		
+		mLogo.layout( x, y, x + viewW, y + viewH );
+		
+		x = w - 9 - 33;
+		y = 7;
+		
+		mFavorite.layout( x, y, x + 33, y + 30 );
+		
+		x = w - 9 - 61;
+		
+		mNowPlaying.layout( x, y, x + 61, y + 30 );
+	}
+
+
+	public class IHRPlayerFavorite extends RelativeLayout implements View.OnClickListener {
+		protected IHRAnimator		mAnimator;
+		protected Thread			mAnimatorThread;
+		protected boolean			mEnabled;
+		protected int				mVisibleView;
+		
+		public IHRPlayerFavorite( Context context ) {
+			super( context );
+			
+			/**/
+			ImageView				view = new ImageView( context );
+			
+			view.setImageResource( R.drawable.favorite_hollow );
+			view.setPadding( 0 , 1 , 0 , 0 );
+			
+			setBackgroundResource( R.drawable.favorite_button );
+			setGravity( Gravity.CENTER );
+			addView( view );
+			/*/
+			Bitmap					bitmap;
+			int						i, n, resourceID;
+			int[]					images = { 1, 4, 7, 10, 13, 16, 19, 22, 25 };
+			Resources				res = getResources();
+			ImageView				view;
+			
+			setWillNotDraw( false );
+			
+			mAnimator = new IHRAnimator( this );
+			
+			for ( i = 0, n = images.length; i < n; ++i ) {
+				resourceID = res.getIdentifier( "star_" + images[ i ], "drawable", context.getPackageName() );
+				bitmap = BitmapFactory.decodeResource( res, resourceID );
+				addView( view = new ImageView( context ) );
+				view.setImageBitmap( bitmap );
+				view.setVisibility( i == 0 ? View.VISIBLE : View.INVISIBLE );
+			}
+			/**/
+			setOnClickListener( this );
+		}
+		
+		@Override
+		public void setEnabled( boolean enabled ) {
+			/**
+			int						i, n;
+			
+			for ( i = 0, n = getChildCount(); i < n; ++i ) {
+				getChildAt( i ).setVisibility( View.INVISIBLE );
+			}
+			
+			if ( ( mEnabled = enabled ) ) {
+				getChildAt( mVisibleView = 0 ).setVisibility( View.VISIBLE );
+			} else {
+				getChildAt( mVisibleView = n - 1 ).setVisibility( View.VISIBLE );
+			}
+			/**/
+			setClickable( mEnabled = enabled );
+			
+//			invalidate();
+		}
+		
+		public void onClick( View view ) {
+			IHRController			controller = mDelegate.mDelegate.topController();
+			
+			if ( controller instanceof IHRControllerPlayer ) {
+				((IHRControllerPlayer)controller).onFavoriteClicked();
+			}
+			
+			/*
+			String					callLetters;
+			
+			if ( ( callLetters = IHRPlayerClient.shared().getIdentifier() ) != null ) {
+				setClickable( false );
+				
+				mAnimatorThread = mAnimator.start();
+				
+				IHRConfigurationClient.shared().addFavorite( callLetters );
+			}
+			*/
+		}
+		
+		/**
+		public boolean handleMessage( Message message ) {
+			int						n;
+			
+			if ( message.obj != mAnimatorThread ) return true;
+
+			if ( message.what == IHRAnimator.kMessageAnimationStepped ) {
+				getChildAt( mVisibleView++ ).setVisibility( View.INVISIBLE );
+				
+				if ( mVisibleView >= ( n = getChildCount() - 1 ) ) mVisibleView = n;
+
+				getChildAt( mVisibleView ).setVisibility( View.VISIBLE );
+
+				if ( mVisibleView == n ) {
+					mAnimator.stop();
+					mEnabled = false;
+				}
+			}
+			
+			return true;
+		}
+		
+		@Override
+		protected void onDraw( Canvas canvas ) {
+			int						resourceID;
+			
+			resourceID = mEnabled ? R.drawable.nav_button_right_empty_down : R.drawable.nav_button_right_empty_down_disabled;
+			
+			canvas.drawBitmap( BitmapFactory.decodeResource( getResources(), resourceID ), 0, 0, null );
+			
+			super.onDraw( canvas );
+		}
+		
+		@Override
+		protected void onLayout( boolean changed, int l, int t, int r, int b ) {
+			int						i, n;
+			
+			for ( i = 0, n = getChildCount(); i < n; ++i ) {
+				getChildAt( i ).layout( 0, 0, 33, 29 );
+			}
+		}
+		/**/
+	}
+}
+
+

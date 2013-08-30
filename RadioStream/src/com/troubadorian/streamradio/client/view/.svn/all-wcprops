@@ -1,0 +1,113 @@
+K 25
+svn:wc:ra_dav:version-url
+V 144
+/svn/clearchannel/!svn/ver/1356/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view
+END
+IHRViewFavorites.java
+K 25
+svn:wc:ra_dav:version-url
+V 166
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRViewFavorites.java
+END
+IHRViewSearch.java
+K 25
+svn:wc:ra_dav:version-url
+V 163
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRViewSearch.java
+END
+IHRViewBanner.java
+K 25
+svn:wc:ra_dav:version-url
+V 163
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRViewBanner.java
+END
+AnimatingImageView.java
+K 25
+svn:wc:ra_dav:version-url
+V 168
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/AnimatingImageView.java
+END
+IHRViewRandomizer.java
+K 25
+svn:wc:ra_dav:version-url
+V 167
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRViewRandomizer.java
+END
+IHRViewButton.java
+K 25
+svn:wc:ra_dav:version-url
+V 163
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRViewButton.java
+END
+IHRListView.java
+K 25
+svn:wc:ra_dav:version-url
+V 161
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRListView.java
+END
+IHRViewInfoSeparator.java
+K 25
+svn:wc:ra_dav:version-url
+V 170
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRViewInfoSeparator.java
+END
+IHRVolumeSlider.java
+K 25
+svn:wc:ra_dav:version-url
+V 165
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRVolumeSlider.java
+END
+IHRViewSlider.java
+K 25
+svn:wc:ra_dav:version-url
+V 163
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRViewSlider.java
+END
+IHRViewMain.java
+K 25
+svn:wc:ra_dav:version-url
+V 161
+/svn/clearchannel/!svn/ver/1356/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRViewMain.java
+END
+IHRViewHeader.java
+K 25
+svn:wc:ra_dav:version-url
+V 163
+/svn/clearchannel/!svn/ver/1352/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRViewHeader.java
+END
+IHRNavigationBar.java
+K 25
+svn:wc:ra_dav:version-url
+V 166
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRNavigationBar.java
+END
+IHRViewSplash.java
+K 25
+svn:wc:ra_dav:version-url
+V 163
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRViewSplash.java
+END
+IHRViewTabBar.java
+K 25
+svn:wc:ra_dav:version-url
+V 163
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRViewTabBar.java
+END
+IHRViewTagged.java
+K 25
+svn:wc:ra_dav:version-url
+V 163
+/svn/clearchannel/!svn/ver/1245/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRViewTagged.java
+END
+IHRViewPlayer.java
+K 25
+svn:wc:ra_dav:version-url
+V 163
+/svn/clearchannel/!svn/ver/1324/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRViewPlayer.java
+END
+IHRNavigationButton.java
+K 25
+svn:wc:ra_dav:version-url
+V 169
+/svn/clearchannel/!svn/ver/1168/trunk/iheartradio/android/clearchannel-android/eclipse/iheartradio/src/com/clearchannel/iheartradio/android/view/IHRNavigationButton.java
+END

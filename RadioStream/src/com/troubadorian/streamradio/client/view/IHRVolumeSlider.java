@@ -1,0 +1,109 @@
+package com.troubadorian.streamradio.client.view;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Rect;
+import android.util.AttributeSet;
+import android.widget.SeekBar;
+
+import com.troubadorian.streamradio.controller.R;
+
+public class IHRVolumeSlider extends SeekBar {
+	private Bitmap leftCap;
+	private Bitmap leftFill;
+	private Bitmap rightCap;
+//	private Bitmap rightFill;
+	private Bitmap thumb;
+	
+	public IHRVolumeSlider(Context context) {
+		super(context);
+		init();
+	}
+
+	public IHRVolumeSlider(Context context, AttributeSet attrs) {
+		super(context, attrs);
+		init();
+	}
+
+	public IHRVolumeSlider(Context context, AttributeSet attrs, int defStyle) {
+		super(context, attrs, defStyle);
+		init();
+	}
+
+	private void init() {
+		leftCap = BitmapFactory.decodeResource( getResources(), R.drawable.volume_slider_cap_left_5px );
+		leftFill = BitmapFactory.decodeResource( getResources(), R.drawable.volume_slider_fill_left_1px );
+		rightCap = BitmapFactory.decodeResource( getResources(), R.drawable.volume_slider_cap_right_5px );
+//		rightFill = BitmapFactory.decodeResource( getResources(), R.drawable.volume_slider_fill_right_1px );
+		thumb = BitmapFactory.decodeResource( getResources(), R.drawable.dot );
+	}
+	
+	public void setVolume( int inPercent ) {
+		setProgress( inPercent );
+	}
+	
+	public int getVolume() {
+		return getProgress();
+	}
+	
+	@Override
+	protected synchronized void onDraw( Canvas canvas ) {
+		final int kCapHeight = 9;
+		final int kCapWidth = 5;
+		final int kFillHeight = 9;
+		final int kFillWidth = 1;
+		final int kPaddingWidth = 1;		// the thumb image is antialiased on the edges and requires some padding
+		final int kThumbHeightHalf = 11;
+		final int kThumbWidth = 22;
+		final int kThumbWidthHalf = 11;
+		
+		int			capTop, effectiveWidth, thumbCenter, verticalCenter, width;
+		Rect		dst, src;
+		
+		verticalCenter = getHeight() / 2;
+		width = getWidth();
+		capTop = verticalCenter - kCapHeight / 2;
+
+		effectiveWidth = width - kThumbWidth;
+		thumbCenter = kThumbWidthHalf + (int)( getProgress() / 100.0 * effectiveWidth ); 
+		
+		// draw caps
+
+		canvas.drawBitmap( leftCap, kPaddingWidth, capTop, null );
+		canvas.drawBitmap( rightCap, width - kPaddingWidth - kCapWidth, capTop, null );
+
+		// draw fill
+		
+		src = new Rect( 0, 0, kFillWidth, kFillHeight );
+		dst = new Rect( kPaddingWidth +  kCapWidth, capTop, thumbCenter, capTop + kFillHeight ); 
+
+		canvas.drawBitmap( leftFill, src, dst, null );  
+
+/*
+ *  We can cheat a bit here...  The underlying graphic has a right empty fill background
+ *  already in place so we get the right fill for free.
+  
+		// draw right fill 
+		
+		dst.left = thumbCenter;
+		dst.right = width - kPaddingWidth - kCapWidth;
+		
+		canvas.drawBitmap( rightFill, src, dst, null );  
+*/
+		// draw thumb
+		
+		canvas.drawBitmap( thumb, thumbCenter - kThumbWidthHalf, verticalCenter - kThumbHeightHalf, null ); 
+	}
+
+	@Override
+	protected synchronized void onMeasure( int widthMeasureSpec, int heightMeasureSpec ) {
+		int				h, w;
+		
+		h = MeasureSpec.getSize( heightMeasureSpec );
+		w = MeasureSpec.getSize( widthMeasureSpec );
+		
+        setMeasuredDimension( w, h );
+	}
+}

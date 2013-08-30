@@ -1,0 +1,1148 @@
+package com.troubadorian.streamradio.client.model;
+
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.Socket;
+import java.net.URI;
+import java.nio.ByteBuffer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import com.troubadorian.streamradio.model.IHRBase64;
+import com.troubadorian.streamradio.model.IHRHTTP;
+import com.troubadorian.streamradio.model.IHRObject;
+import com.troubadorian.streamradio.model.IHRTCPForwarder;
+import com.troubadorian.streamradio.model.IHRUDPForwarder;
+import com.troubadorian.streamradio.model.IHRUtilities;
+//import com.troubadorian.streamradio.model.LogWriter;
+
+public class IHRRTSP extends IHRTCPForwarder {
+	protected IHRRTSPDelegate			mDelegate;
+	protected String					mMediavault;
+	protected String					mSite;
+	protected String					mUniqueDeviceID;
+	
+	// RTP intercept
+	protected IHRUDPForwarder			mRTPForwarder;
+	protected DatagramSocket			mRTPForwarderSocket;
+	protected int						mRTPLocalPort;
+	protected String					mRTPRemoteHost;
+	protected int						mRTPRemotePort;
+
+	// RTCP intercept
+	protected IHRRTCPForwarder			mRTCPForwarder;
+	protected DatagramSocket			mRTCPForwarderSocket;
+	protected int						mRTCPLocalPort;
+	protected int						mRTCPRemotePort;
+	
+	// RTSP intercept
+	protected String					mRTSPLocalHostPort;
+	protected String					mRTSPLocalHostPortRE;
+	protected String					mRTSPRemoteHostPort;
+	protected String					mRTSPRemoteHostPortRE;
+
+	// RTSP/RTP/RTCP HTTP tunnel
+	protected int						mRTCPChannel;
+	protected int						mRTPChannel = -1;
+	protected String					mSessionCookie;
+	protected String					mTunnelQuery;
+	protected IHRRTSPHTTPTunnelReader	mTunnelReader;
+	protected URI						mTunnelURI;
+	protected String					mTunnelURL;
+	protected IHRRTSPHTTPTunnelWriter	mTunnelWriter;
+
+// debug
+	protected boolean					mPrepared;
+// debug
+	
+	protected static final int			kRTSPRemotePort = 554;
+
+	protected static final int			kDelegateNotificationTypeRTSPClosed = 0;
+
+	protected static Pattern			sPatternRTSPRequestURI = Pattern.compile( "^[^ ]+ ([^ ]+)" );
+	protected static Pattern			sPatternClientPort = Pattern.compile( "(;?)client_port=([0-9]+)-([0-9]+)" );
+	protected static Pattern			sPatternContentLength = Pattern.compile( "(?i)content-length: ([0-9]+)" );
+	protected static Pattern			sPatternInterleaved = Pattern.compile( "interleaved=([0-9]+)-([0-9]+)" );
+	protected static Pattern			sPatternServerPort = Pattern.compile( "server_port=([0-9]+)-([0-9]+)" );
+	protected static Pattern			sPatternSource = Pattern.compile( "source=([0-9.]+)" );
+	
+	//protected LogWriter log = new LogWriter();
+
+	// localhost: (rtsp client) <-> IHRRTSP <-> rtsp
+	public IHRRTSP( URI rtspURI, IHRRTSPDelegate delegate, String mediavault, String deviceID, String site ) throws Exception {
+		super( rtspURI );
+		
+		System.out.println( "IHRRTSP created for " + rtspURI );
+		
+		mDelegate = delegate;
+		mMediavault = mediavault;
+		mRTSPLocalHostPort = "127.0.0.1:" + mServerSocket.getLocalPort();
+		mRTSPLocalHostPortRE = mRTSPLocalHostPort.replaceAll( "\\.", "\\\\." );
+		mRTSPRemoteHostPort = mRemoteHost + ":" + mRemotePort;
+		mRTSPRemoteHostPortRE = mRTSPRemoteHostPort.replaceAll( "\\.", "\\\\." );
+		mSite = site;
+		mUniqueDeviceID = deviceID;
+
+		open();
+	}
+	
+	@Override
+	public void close() {
+		super.close();
+
+		if ( mRTCPForwarder != null ) mRTCPForwarder.close();
+		if ( mRTCPForwarderSocket != null ) mRTCPForwarderSocket.close();
+		if ( mRTPForwarder != null ) mRTPForwarder.close();
+		if ( mRTPForwarderSocket != null ) mRTPForwarderSocket.close();
+		if ( mTunnelReader != null ) mTunnelReader.cancel();
+
+		mTunnelQuery = null;
+		mTunnelURI = null;
+		mTunnelURL = null;
+
+		notifyDelegate( kDelegateNotificationTypeRTSPClosed, null );
+	}
+	
+	public int getBytesRead() { return mTunnelReader != null ? mTunnelReader.getBytesRead() : 0; }
+
+	public String getRTSPURL() {
+		return "rtsp://127.0.0.1:" + mServerSocket.getLocalPort() + mURI.getPath();
+	}
+	
+	public String logPrepared() {
+		int						bytesRead;
+		double					elapsed, kbps;
+		String					message = null;
+		
+		if ( mTunnelReader != null ) {
+			bytesRead = mTunnelReader.getBytesRead();
+			
+			elapsed = ( ( System.currentTimeMillis() - mTunnelReader.getFirstByteReadTime() ) / 10 );
+			elapsed /= 100.0;
+			
+			kbps = bytesRead * 8.0 / 1000.0;
+			kbps = ((int) ( kbps / elapsed ) * 100) / 100.0;
+			
+			message = "prepare " + bytesRead + " " + kbps + "kbps " + elapsed + "s"; 
+			
+			log( "logPrepared", "player was prepared in " + elapsed + "s, " + bytesRead + " bytes read, " + kbps + " kbps" );
+		}
+		
+		mPrepared = true;
+		
+		return message;
+	}
+	
+	@Override
+	public void run() {
+		boolean					opened = false;
+		int						i, n, port;
+		Thread					thread;
+
+		// First try to open the RTSP stream over an HTTP tunnel, see
+		// http://developer.apple.com/quicktime/icefloe/dispatch028.html
+		try {
+			synchronized( this ) {
+				if ( mClosed ) return;
+			
+				openRTPAndRTCPSockets();
+			}
+
+			// Accept the player connection to the local socket
+			mLocalSocket = mServerSocket.accept();
+
+			synchronized( this ) {
+				if ( mClosed ) {
+					try { mLocalSocket.close(); } catch ( Exception e ) { }
+					mLocalSocket = null;
+					return;
+				}
+
+				// Try to open an HTTP tunnel to the Quicktime Streaming server.
+				//
+				// If the port specification in the original RTSP URL is empty or explicitly
+				// 554 we assume 554 and handle things as follows:
+				//
+				// If on WiFi, we redirect instead to port 80 as a first try.  QuickTime streaming
+				// servers at Akamai listen on both 554 and 80 and connecting to port 80 generally
+				// has better firewall traversal so we expect that to work more often behind corporate
+				// networks.  If it fails we fall back to 554.
+				//
+				// We don't try to do this switch on cellular data networks because T-Mobile has
+				// a Harmony proxy in place that restricts large data transfers on port 80.
+				// Surprisingly they let RTSP on 554 pass unmodified.
+				//
+				// If the port for some reason is explicitly not 554 we use that only regardless of
+				// network.
+				
+				if ( mRemotePort == 554 && IHRUtilities.isUsingWiFi() ) {
+					n = 2;
+					port = 80;
+//					int debugForTcpdump = 1; n = 1; port = 554;
+				} else {
+					n = 1;
+					port = mRemotePort;
+				}
+				
+				for ( i = 0; i < n; ++i ) {
+					try {
+						// Android's HttpURLConnection class that is opened by IHRHTTP forces communication via HTTP/1.1.
+						// Current QTSS implementations have a bug that strips query strings from the request if HTTP/1.0 is
+						// not used.  The IHRHTTPModifier object is used as a filter to dynamically alter the outgoing HTTP
+						// request line to indicate the request is HTTP 1.0.  A gross hack.
+						
+						// Update: The IHRHTTPModifier seems to be slowing things down too much.  I really need to write
+						// some code to convert Shoutcast to RTSP and be done with this.  In the meantime explore alternate
+						// reporting options.
+						
+						String host = mURI.getHost();
+						
+						mTunnelURI = new URI( "http", mURI.getUserInfo(), host, port, mURI.getPath(), mURI.getQuery(), mURI.getFragment() );
+						mTunnelURL = new URI( "http", mTunnelURI.getUserInfo(), mTunnelURI.getHost(), mTunnelURI.getPort(), mTunnelURI.getPath(), mTunnelURI.getQuery(), mTunnelURI.getFragment() ).toASCIIString();
+						mTunnelQuery = mTunnelURI.getQuery();
+						
+						mTunnelReader = new IHRRTSPHTTPTunnelReader();
+						
+						break;
+					} catch ( Exception e ) { }
+					
+					port = 554;
+				}
+				
+				if ( i == n ) throw new Exception( "unable to open RTSP connection" );
+
+				mRemotePort = port;
+				mRTSPRemoteHostPort = mRemoteHost + ":" + mRemotePort;
+				mRTSPRemoteHostPortRE = mRTSPRemoteHostPort.replaceAll( "\\.", "\\\\." );						
+
+				mTunnelWriter = new IHRRTSPHTTPTunnelWriter();
+				
+				thread = new Thread( mTunnelReader );
+					
+				thread.setName( mTunnelReader.getClass().getSimpleName() );
+				thread.start();
+				
+				opened = true;
+			}
+		} catch ( Exception e ) {
+			log( "run", "exception a: " + e );
+		}
+		
+		// If we failed to open a tunnel, try to fall back on normal RTSP with forwarding 
+		try {
+			if ( ! opened ) {
+				synchronized( this ) {
+					if ( mClosed ) return;
+				
+					mRemoteSocket = new Socket( mRemoteHost, mRemotePort );
+					mTunnelURI = null;
+						
+					mLocalReader = new IHRTCPConnectionHalf( kDataSourceLocal, mLocalSocket.getInputStream(), mRemoteSocket.getOutputStream() );
+					mRemoteReader = new IHRTCPConnectionHalf( kDataSourceRemote, mRemoteSocket.getInputStream(), mLocalSocket.getOutputStream() );
+					
+					opened = true;
+				}
+			}
+		} catch ( Exception e ) {
+			log( "run", "exception b: " + e );
+		}
+		
+		synchronized( this ) {
+			try { if ( mServerSocket != null ) mServerSocket.close(); } catch ( Exception e ) { }
+			
+			mServerSocket = null;
+		}
+		
+		if ( ! opened ) close();
+	}
+
+	// protected methods
+
+	@Override
+	protected int defaultPort() { return kRTSPRemotePort; }
+
+	@Override
+	protected ByteBuffer modifyByteStream( int dataSource, byte[] bytes, int length, boolean returnCopy ) throws Exception {
+		return dataSource == kDataSourceLocal ? modifyLocalRTSPRequest( bytes, 0, length ) : modifyRemoteRTSPReply( bytes, 0, length ); 
+	}
+	
+	protected ByteBuffer modifyLocalRTSPRequest( byte[] bytes, int offset, int length ) throws Exception {
+		ByteBuffer				buffer;
+		Matcher					matcher;
+		String					requestURI, string;
+		
+//		dump( "RTSP REQUEST[ in]", bytes, offset, length );
+
+		string = new String( bytes, offset, length, "ISO-8859-1" );
+
+		// convert request to localhost into request to remote
+		string = string.replaceAll( mRTSPLocalHostPortRE, mRTSPRemoteHostPort );
+
+		// android player is chopping query strings
+		//commented out to fix problem connecting to stream guys streams. This needs to be looked at to see if we
+		//need to remove or fix this code.
+		if ( mTunnelQuery != null && mTunnelQuery.length() > 0 ) {
+			matcher = sPatternRTSPRequestURI.matcher( string );
+			
+			if ( ! matcher.find() ) {
+				//log.write("WE ARE THROWING AN EXCEPTION");
+				throw new Exception( "invalid RTSP request" );
+			}
+
+			requestURI = matcher.group( 1 );
+			
+			if ( requestURI.indexOf( mTunnelQuery ) < 0 ) {
+				requestURI += requestURI.indexOf( '?' ) < 0 ? '?' : '&';
+				requestURI += mTunnelQuery;
+			}
+			
+			string = string.substring( 0, matcher.start( 1 ) ) + requestURI + string.substring( matcher.end( 1 ) );
+		}
+		
+		
+		if ( string.indexOf( "SETUP" ) == 0 ) {
+			//log.write("BEFORE SETUP CHANGE \r\n");
+			//log.write(string);
+			string = modifyLocalRTSPRequestSETUP( string );
+			//log.write("AFTER SETUP CHANGE \r\n");
+			//log.write(string);
+		} else {
+			//log.write(string);
+		}
+
+		buffer = ByteBuffer.wrap( string.getBytes( "ISO-8859-1" ) );
+		
+//		dump( "RTSP REQUEST[out]", buffer.array() );
+		
+		return buffer;
+	}
+	
+	protected String modifyLocalRTSPRequestSETUP( String string ) throws Exception {
+		String					clientPort;
+		Matcher					matcher;
+
+		matcher = sPatternClientPort.matcher( string );
+
+		if ( matcher.find() ) {
+			if ( mRTCPLocalPort == 0 ) {
+				mRTPLocalPort = new Integer( matcher.group( 2 ) ).intValue();
+				mRTCPLocalPort = new Integer( matcher.group( 3 ) ).intValue();
+				
+//				log( "modifyLocalRTSPRequestSETUP", "Player RTP port:  " + mRTPLocalPort );
+//				log( "modifyLocalRTSPRequestSETUP", "Player RTCP port: " + mRTCPLocalPort );
+			}
+
+			if ( mTunnelReader == null ) {
+				clientPort = matcher.group( 1 ) + "client_port=" + mRTPForwarderSocket.getLocalPort() + '-' + mRTCPForwarderSocket.getLocalPort();
+
+//				log( "modifyLocalRTSPRequest", "mapped non-tunneled " + matcher.group() + " to " + clientPort );
+			} else {
+				clientPort = "";
+			}
+
+			string = matcher.replaceAll( clientPort );
+			
+			if ( mTunnelReader != null ) {
+				string = string.replaceFirst( "RTP/AVP/UDP", "RTP/AVP/TCP" );
+			}
+		}
+		
+		return string;
+	}
+
+	protected ByteBuffer modifyRemoteRTSPReply( byte[] bytes, int offset, int length ) throws Exception {
+		ByteBuffer				buffer;
+		Matcher					matcher;
+		boolean					openForwarders = false;
+		String					string, transport;
+		
+//		dump( "RTSP REPLY[ in]", bytes, offset, length );
+		
+		string = new String( bytes, offset, length, "ISO-8859-1" );
+
+		string = string.replaceAll( mRTSPRemoteHostPortRE, mRTSPLocalHostPort );
+		
+		if ( mTunnelReader != null ) {
+			matcher = sPatternInterleaved.matcher( string );
+			
+			if ( matcher.find() ) {
+				if ( mRTPChannel == -1 ) {
+					//log.write("SETTING INTERLEAVE CHANNELS\r\n\r\n");
+					mRTPChannel = new Integer( matcher.group( 1 ) ).intValue();
+					mRTCPChannel = new Integer( matcher.group( 2 ) ).intValue();
+					
+					openForwarders = true;
+				}
+			}
+		} else {
+			matcher = sPatternServerPort.matcher( string );
+
+			if ( matcher.find() ) {
+				if ( mRTCPRemotePort == 0 ) {
+					mRTPRemotePort = new Integer( matcher.group( 1 ) ).intValue();
+					mRTCPRemotePort = new Integer( matcher.group( 2 ) ).intValue();
+
+					openForwarders = true;
+				}
+			}
+
+			matcher = sPatternSource.matcher( string );
+
+			if ( matcher.find() ) {
+				mRTPRemoteHost = matcher.group( 1 );
+			}
+		}
+		
+		if ( openForwarders ) openRTPAndRTCPForwarders();
+
+		if ( mRTPForwarder != null && string.indexOf( "Transport:" ) != -1 ) {
+			transport = "Transport: RTP/AVP" +
+				";unicast" +
+				";source=127.0.0.1" +
+				";client_port=" + mRTPLocalPort + "-" + mRTCPLocalPort +
+				";server_port=" + mRTPForwarder.getPort() + "-" + mRTCPForwarder.getPort() +
+				"\r\n";
+			
+			string = string.replaceFirst( "Transport:.*?\r\n", transport );
+		}
+		
+		buffer = ByteBuffer.wrap( string.getBytes( "ISO-8859-1" ) );
+		
+//		dump( "RTSP REPLY[out]", buffer.array() );
+		
+		return buffer;
+	}
+	
+	protected void notifyDelegate( int notificationType, Object argument ) {
+		if ( mDelegate == null || mClosed ) return;
+		
+		switch ( notificationType ) {
+			case kDelegateNotificationTypeRTSPClosed:		mDelegate.rtspClosed( this, (Exception) argument );			break;
+		}
+	}
+
+	protected void openRTPAndRTCPForwarders() throws Exception {
+		int						port;
+		
+		if ( mRTCPForwarder == null ) {
+			port = mTunnelReader == null ? mRTCPRemotePort : mRTCPForwarderSocket.getLocalPort();
+			
+			mRTCPForwarder = new IHRRTCPForwarder( mRTCPForwarderSocket, mRTCPLocalPort, mRTPRemoteHost, port );
+			mRTCPForwarderSocket = null;
+			mRTCPForwarder.open();
+		}
+		if ( mRTPForwarder == null ) {
+			port = mTunnelReader == null ? mRTPRemotePort : mRTPForwarderSocket.getLocalPort();
+
+			mRTPForwarder = new IHRRTPForwarder( mRTPForwarderSocket, mRTPLocalPort, mRTPRemoteHost, port );
+			mRTPForwarderSocket = null;
+			mRTPForwarder.open();
+		}
+	}
+
+	protected void openRTPAndRTCPSockets() throws Exception {
+		int								i, n, port;
+		DatagramSocket					even, odd, socket;
+
+		// bind to two consecutive ports for RTP/RTCP.  Try this up to 32 times,
+		// assuming that failing to allocate two consecutive ports after that
+		// number of tries means something else in the system is broken.
+		for ( even = odd = null, i = 0, n = 32; i < n; ++i ) {
+			try {				
+				socket = new DatagramSocket();
+				
+				// RTP is always even numbered, RTCP is RTP + 1
+				if ( ( ( port = socket.getLocalPort() ) & 1 ) == 0 ) {
+					even = socket;
+					odd = new DatagramSocket( port + 1 );
+				} else {
+					odd = socket;
+					even = new DatagramSocket( port - 1 );
+				}
+				
+				break;
+			} catch ( Exception e ) { }
+
+			if ( even != null ) try { even.close(); } catch ( Exception e ) { }
+			if ( odd != null ) try { odd.close(); } catch ( Exception e ) { }
+
+			even = odd = null;
+		}
+		
+		if ( i == n ) throw new Exception( "unable to create RTP/RTCP sockets" );
+
+		mRTPForwarderSocket = even;
+		mRTCPForwarderSocket = odd;
+
+//		log( "openRTPAndRTCPSockets", "RTPForwarder  port: " + mRTPForwarderSocket.getLocalPort() );
+//		log( "openRTPAndRTCPSockets", "RTCPForwarder port: " + mRTCPForwarderSocket.getLocalPort() );
+	}
+	
+	// protected classes
+	
+	protected class IHRRTCPForwarder extends IHRUDPForwarder {
+		protected long					mTimeInModifyByteStream;
+		
+		public IHRRTCPForwarder( DatagramSocket socket, int localPort, String remoteHost, int remotePort ) throws Exception {
+			super( socket, localPort, remoteHost, remotePort );
+		}
+
+		@Override
+		protected int getPacketSource( DatagramPacket packet ) {
+			if ( mTunnelReader == null ) return super.getPacketSource( packet );
+
+//			dump( "RTCP packet from [" + packet.getPort() + "] " + ( packet.getPort() == mRTCPLocalPort ? "PLAYER" : "SERVER" ), packet.getData(), 0, packet.getLength() );
+
+			// if tunnel is non-null then all packets come from the localhost
+			return packet.getPort() == mRTCPLocalPort ? kDataSourceLocal : kDataSourceRemote;
+		}
+		
+		@Override
+		protected ByteBuffer modifyByteStream( int dataSource, byte[] bytes, int length, boolean returnCopy ) throws Exception {
+			ByteBuffer			buffer;
+			boolean				done = false;
+//			long				elapsed, start;
+			IHRHashtable		hash;
+			int					i, j, k, n, o;
+			String[]			keys = { "amgArtistId", "amgTrackId", "cartcutId", "itunesTrackId", "lyricsId", "MediaBaseId", "song_spot", "text", "thumbplayId" };
+			String				string = null;
+			
+//			start = System.currentTimeMillis();
+			
+			buffer = super.modifyByteStream( dataSource, bytes, length, returnCopy );
+			
+			i = n = 0;			// suppress compiler errors
+			
+			if ( mDelegate == null || dataSource != kDataSourceRemote ) done = true;
+			if ( ! done ) {
+				string = new String( buffer.array(), 0, buffer.limit(), "ISO-8859-1" );
+			
+				if ( ( i = string.indexOf( "Artist=" ) ) < 0 ) done = true;
+			}
+			if ( ! done && ( i += 7 ) == ( n = string.length() ) ) done = true;		// i += strlen( "Artist=" )
+			if ( ! done && string.charAt( i ) == ';' ) done = true;					// "Artist=;"
+			if ( ! done ) {
+	//			System.out.println( "RTCP METADATA: " + string.substring( i - 7 ) );
+	
+				hash = new IHRHashtable();
+				
+				if ( ( j = string.indexOf( ";", i ) ) < 0 ) j = n;
+	
+				hash.put( "artist", string.substring( i, j ) );
+				
+				for ( k = 0, o = keys.length; k < o; ++k ) {
+					if ( ( i = string.indexOf( keys[ k ] + "=\"" ) ) >= 0 ) {
+						if ( ( i += keys[ k ].length() + 2 ) == n ) continue;
+	
+						if ( ( j = string.indexOf( "\"", i ) ) < 0 ) j = n;
+	
+						if ( j > i ) hash.put( keys[ k ], string.substring( i, j ) );
+					}
+				}
+	
+				if ( ( string = (String) hash.get( "text" ) ) != null ) hash.put( "track", string );
+						hash.put("iscommercial", "");//Code added by sriram on 08-31-2010
+		
+				if ( ( string = (String) hash.get( "song_spot" ) ) == null || ! string.equals( "M" ) ||
+					 ( string = (String) hash.get( "track" ) ) == null || string.length() == 0 )
+				{
+					hash.put("iscommercial", "1");//Code added by sriram on 08-31-2010
+
+					hash.put( "artist", "" );
+					hash.put( "track", "" );
+				}
+				
+				mDelegate.rtspMetadata( IHRRTSP.this, hash );
+			}
+			
+//			mTimeInModifyByteStream += elapsed = System.currentTimeMillis() - start;
+			
+//			log( "modifyByteStream", "Time in modifyByteStream() this call " + ( elapsed / 1000.0 ) + "s, " + ( mTimeInModifyByteStream / 1000.0 ) + "s overall" );
+			
+			return buffer;
+		}
+
+		@Override
+		protected void sendToRemoteHost( DatagramPacket packet ) throws Exception {
+			// I've elected to send multiple HTTP POST requests per RTSP command
+			// from the local player in an effort to get maximum firewall traversal.
+			//
+			// As a result, a ton of small RTP and RTCP requests will be issued from
+			// the player and wind up generating a lot of outbound POST traffic.
+			//
+			// Since the streaming server doesn't need anything other than RTSP from
+			// the client I'm disabling all client -> server RTP and RTCP here.
+/*
+			if ( mTunnelReader == null ) {
+				super.sendToRemoteHost( packet );
+				return;
+			}
+			
+			mTunnelWriter.postRTPOrRTCP( mRTCPChannel, packet.getData(), 0, packet.getLength() );
+*/
+		}
+	}
+
+	protected class IHRRTPForwarder extends IHRUDPForwarder {
+		public IHRRTPForwarder( DatagramSocket socket, int localPort, String remoteHost, int remotePort ) throws Exception {
+			super( socket, localPort, remoteHost, remotePort );
+		}
+
+		@Override
+		protected int getPacketSource( DatagramPacket packet ) {
+			if ( mTunnelReader == null ) return super.getPacketSource( packet );
+
+//			dump( "RTP packet from [" + packet.getPort() + "] " + ( packet.getPort() == mRTCPLocalPort ? "PLAYER" : "SERVER" ), packet.getData(), 0, packet.getLength() );
+
+			// if tunnel is non-null then all packets come from the localhost
+			return packet.getPort() == mRTPLocalPort ? kDataSourceLocal : kDataSourceRemote;
+		}
+
+		@Override
+		protected void sendToRemoteHost( DatagramPacket packet ) throws Exception {
+			// I've elected to send multiple HTTP POST requests per RTSP command
+			// from the local player in an effort to get maximum firewall traversal.
+			//
+			// As a result, a ton of small RTP and RTCP requests will be issued from
+			// the player and wind up generating a lot of outbound POST traffic.
+			//
+			// Since the streaming server doesn't need anything other than RTSP from
+			// the client I'm disabling all client -> server RTP and RTCP here.
+/*
+			if ( mTunnelReader == null ) {
+				super.sendToRemoteHost( packet );
+				return;
+			}
+			
+			mTunnelWriter.postRTPOrRTCP( mRTPChannel, packet.getData(), 0, packet.getLength() );
+*/
+		}
+	}
+
+//*
+	// tunnel support
+	protected class IHRRTSPHTTPTunnelPost {
+		protected int					mBytesWritten;
+		protected boolean				mClosed;
+		protected OutputStream			mOutputStream;
+		protected Socket				mSocket;
+		
+		public IHRRTSPHTTPTunnelPost() throws Exception { open(); }
+
+		public IHRRTSPHTTPTunnelPost( byte[] buffer, int offset, int length, boolean isRTSP ) throws Exception { throw new Exception( "Unsupported constructor" ); }
+
+		public void close() {
+			if ( mOutputStream != null ) {
+				try { mOutputStream.close(); } catch ( Exception e ) { }
+
+				mOutputStream = null;
+			}
+			if ( mSocket != null ) {
+				try {  mSocket.close(); } catch ( Exception e ) { }
+				
+				mSocket = null;
+			}
+		}
+		
+		protected void open() throws Exception {
+			byte[]						buffer;
+			String						connect;
+			
+			mSocket = new Socket( mTunnelURI.getHost(), mTunnelURI.getPort() );
+			
+			try {
+				mOutputStream = mSocket.getOutputStream();
+
+				connect = "POST " + mTunnelURI.getPath() + mTunnelURI.getQuery() + mTunnelURI.getFragment() + " HTTP/1.0\r\n" +
+					"cache-control: no-cache\r\ncontent-length: 65535\r\ncontent-type: application/x-rtsp-tunnelled\r\npragma: no-cache\r\nx-sessioncookie: " +
+					mSessionCookie + "\r\nUser-Agent: iheartradio_Android_IHRRTSPTunnelPost\r\nHost: " + mTunnelURI.getHost() + "\r\nConnection: Keep-Alive\r\n\r\n";
+				
+				mOutputStream.write( buffer = connect.getBytes( "ISO-8859-1" ) );
+				mOutputStream.flush();
+				
+				mBytesWritten = buffer.length;
+			} catch ( Exception e ) {
+				close();
+				
+				throw new Exception( e.getMessage() );
+			}
+		}
+		
+		public void post( byte[] buffer, int offset, int length, boolean isRTSP ) throws Exception {
+			buffer = prepareBuffer( buffer, offset, length, isRTSP );
+			//log.write("Inside the post\r\n");
+			//log.write(new String(IHRBase64.decode(buffer)));
+			if ( mBytesWritten + buffer.length > 65535 ) {
+				close();
+				open();
+			}
+
+			mOutputStream.write( buffer );
+			mOutputStream.flush();
+			
+			mBytesWritten += buffer.length;
+
+//			log( "post", "posted " + buffer.length + " bytes, " + mBytesWritten + " total" );
+		}
+
+		protected byte[] prepareBuffer( byte[] buffer, int offset, int length, boolean isRTSP ) throws Exception {
+			ByteBuffer			byteBuffer;
+			
+			if ( isRTSP ) {
+				byteBuffer = modifyLocalRTSPRequest( buffer, offset, length );
+				
+				buffer = byteBuffer.array();
+				length = byteBuffer.limit();
+				offset = 0;
+			} else {
+//				dump( "client " + ( buffer[ 1 ] == mRTPChannel ? "RTP" : "RTCP" ) + " request", buffer, offset, length );
+			}
+			
+//			dump( "client -> server POST", buffer, offset, length );
+			
+			return IHRBase64.encode( buffer, offset, length );
+		}
+	}
+/*/
+	protected class IHRRTSPHTTPTunnelPost extends IHRHTTP {
+		public IHRRTSPHTTPTunnelPost() throws Exception { throw new Exception( "Unsupported constructor" ); }
+		
+		public IHRRTSPHTTPTunnelPost( byte[] buffer, int offset, int length, boolean isRTSP ) throws Exception {
+			String						error = null;
+			
+			try {
+				post( buffer, offset, length, isRTSP );
+			} catch ( Exception e ) {
+				error = e.toString();
+			}
+			
+			close();
+			
+			if ( error != null ) throw new Exception( error );
+		}
+		
+		private void open( byte[] buffer ) throws Exception {
+			synchronized( IHRRTSP.this ) {
+				if ( mClosed || mTunnelURI == null ) return;
+				
+				mURL = mTunnelURL;
+			}
+
+			open();
+
+			log( "open", "client -> server posted " + buffer.length + " bytes" );
+		}
+
+		@Override
+		public void close() { super.close(); }
+		
+		public void post( byte[] buffer, int offset, int length, boolean isRTSP ) throws Exception {
+			mPostData = prepareBuffer( buffer, offset, length, isRTSP ); 
+			
+			open( mPostData );
+		}
+		
+		@Override
+		protected int getResponseCode() throws Exception { return 200; }
+
+		protected byte[] prepareBuffer( byte[] buffer, int offset, int length, boolean isRTSP ) throws Exception {
+			ByteBuffer			byteBuffer;
+			
+			if ( isRTSP ) {
+				byteBuffer = modifyLocalRTSPRequest( buffer, offset, length );
+				
+				buffer = byteBuffer.array();
+				length = byteBuffer.limit();
+				offset = 0;
+			} else {
+//				dump( "client " + ( buffer[ 1 ] == mRTPChannel ? "RTP" : "RTCP" ) + " request", buffer, offset, length );
+			}
+			
+//			dump( "client -> server POST", buffer, offset, length );
+			
+			return IHRBase64.encode( buffer, offset, length );
+		}
+
+		@Override
+		protected void prepareRequest() throws Exception {
+			((HttpURLConnection) mConnection).setUseCaches( false );
+			
+			setRequestMethod( "POST" );
+
+			setRequestProperty( "cache-control", "no-cache" );
+			setRequestProperty( "Content-Length", String.valueOf( mPostData.length ) );		// 64k for persistent post
+			setRequestProperty( "Content-Type", "application/x-rtsp-tunnelled" );
+			setRequestProperty( "pragma", "no-cache" );
+			setRequestProperty( "x-sessioncookie", mSessionCookie );
+
+//			log( "prepareRequest", "mPostData.length is " + mPostData.length );
+		}
+		
+		@Override
+		protected boolean processResponse() { return true; }
+	}
+//*/
+	
+	// The tunnel reader reads data from the server, fiddles with it, and writes it to the local RTSP client
+	protected class IHRRTSPHTTPTunnelReader extends IHRHTTP {
+		protected DatagramPacket		mDatagram;
+		protected DatagramSocket		mDatagramSocket;
+		protected byte[]				mFixup;
+//		protected IHRHTTPModifier		mHTTPModifier;
+		protected long					mLastThroughputSentTime;
+		protected OutputStream			mOutputStream;
+		protected int					mSize;
+		protected int					mState;
+		
+		protected static final int		kReadingUnknown = 0;
+		protected static final int		kReadingRTCP = 1;
+		protected static final int		kReadingRTP = 2;
+		protected static final int		kReadingRTSP = 3;
+		
+		public IHRRTSPHTTPTunnelReader() throws Exception {
+			super();
+			
+			mDatagram = new DatagramPacket( new byte[ 1 ], 0, 1, InetAddress.getByName( "127.0.0.1" ), 0 );
+			mDatagramSocket = new DatagramSocket();
+			mOutputStream = mLocalSocket.getOutputStream();
+			mSessionCookie = new String( IHRBase64.encode( IHRUtilities.randomUUID() ) );
+
+/*/
+			mHTTPModifier = new IHRHTTPModifier( mTunnelURI );
+			mURL = new URI( "http", mURI.getUserInfo(), "127.0.0.1", mHTTPModifier.getLocalPort(), mURI.getPath(), mURI.getQuery(), mURI.getFragment() ).toASCIIString();
+			log( "IHRRTSPHTTPTunnelReader", "opening http tunnel to " + "127.0.0.1:" + mHTTPModifier.getLocalPort() + ", datagram forwarder port " + mDatagramSocket.getLocalPort() );
+/*/
+			mURL = mTunnelURL;
+			log( "IHRRTSPHTTPTunnelReader", "opening unmodified http tunnel to " + mTunnelURI.getHost() + ":" + mTunnelURI.getPort() + ", datagram forwarder port " + mDatagramSocket.getLocalPort() );
+/**/
+			open();
+			
+			log( "IHRRTSPHTTPTunnelReader", "opened http tunnel" );
+		}
+		
+		@Override
+		public void close() {
+			super.close();		
+/*
+			if ( mHTTPModifier != null ) {
+				mHTTPModifier.close();
+				mHTTPModifier = null;
+			}
+*/
+		}
+
+		@Override
+		public void run() {
+			try {
+				read();
+			} catch ( Exception e ) {
+				notifyDelegate( kDelegateNotificationTypeRTSPClosed, e );
+			}
+		}
+
+		// protected methods
+		
+		@Override
+		protected void prepareRequest() throws Exception {
+			setRequestProperty( "accept", "application/x-rtsp-tunnelled" );
+			setRequestProperty( "cache-control", "no-cache" );
+			setRequestProperty( "pragma", "no-cache" );
+			setRequestProperty( "x-sessioncookie", mSessionCookie );
+		}
+		
+		@Override
+		protected void processData( byte[] data, String message ) throws Exception {
+			// due to the RTSP/RTP/RTCP TCP interleaving, data here has
+			// to be carefully tracked to distinguish between the various types.
+			
+//			dump( "processData", data );
+			
+			// assertion: data.length > 0 (see IHRInputStream.readInputStream() )
+			byte[]						buffer;
+			ByteBuffer					byteBuffer;
+			int							i, n, offset, remaining, size;
+//			String						key;
+			String						string;
+			Matcher						matcher;
+			long						now;
+//			IHRRTSPHTTPTunnelPost		post;
+			
+			if ( message != null ) {
+				now = System.currentTimeMillis();
+				
+				if ( now > mLastThroughputSentTime + 1000 ) {
+					IHRRTSP.this.mDelegate.rtspThroughput( IHRRTSP.this, message );
+					mLastThroughputSentTime = now;
+				}
+			}
+			
+			if ( mFixup != null ) {
+				buffer = new byte[ mFixup.length + data.length ];
+				System.arraycopy( mFixup, 0, buffer, 0, mFixup.length );
+				System.arraycopy( data, 0, buffer, mFixup.length, data.length );
+				mFixup = null;
+				data = buffer;
+			}
+			
+		scan:
+	
+			for ( offset = 0;; ) {
+				if ( ( remaining = data.length - offset ) == 0 ) break; // return;
+				
+				if ( mState == kReadingUnknown ) {
+					switch ( data[ offset ] ) {
+						case '$': {
+							if ( remaining >= 2 ) {
+								if ( data[ offset + 1 ] == mRTCPChannel ) mState = kReadingRTCP;
+								else if ( data[ offset + 1 ] == mRTPChannel ) mState = kReadingRTP;
+								else throw new Exception( "invalid interleave channel " + data[ 1 ] );
+							} else {
+								break scan;
+							}
+						} break;
+						
+						default: {
+							mState = kReadingRTSP;
+						} break;
+					}
+				}
+				
+				switch ( mState ) {
+					case kReadingRTSP: {
+						for ( i = offset + 3, n = data.length; i < n; ) {
+							if ( data[ i     ] != '\n' ) { i += 1; continue; }
+							if ( data[ i - 1 ] != '\r' ) { i += 3; continue; }
+							if ( data[ i - 2 ] != '\n' ) { i += 1; continue; }
+							if ( data[ i - 3 ] != '\r' ) { i += 1; continue; }
+
+							// here we have the end of the message headers.
+							// an RTSP message can contain a content-length field, in which
+							// case a message body follows.
+
+							string = new String( data, offset, ++i - offset, "ISO-8859-1" );
+
+							matcher = sPatternContentLength.matcher( string );
+							
+							if ( matcher.find() ) {
+								if ( ( i += new Integer( matcher.group( 1 ) ).intValue() ) > n ) break scan;
+							}
+
+							byteBuffer = modifyRemoteRTSPReply( data, offset, i - offset );
+						
+//							dump( "WRITE TO PLAYER", byteBuffer.array() );
+						
+							mOutputStream.write( byteBuffer.array(), 0, byteBuffer.limit() );
+							mOutputStream.flush();
+
+							offset = i;
+							mState = kReadingUnknown;
+							continue scan;
+						}
+						
+						if ( i == n ) break scan;
+					} break;
+					
+					case kReadingRTCP:
+					case kReadingRTP: {
+						if ( remaining < 4 ) break scan;
+						size = ( ( data[ offset + 2 ] & 0xff ) << 8 | ( data[ offset + 3 ] & 0xff ) ) + 4;
+						if ( remaining < size ) break scan;
+
+/*
+						if ( mState == kReadingRTCP ) {
+							log( "RTCP FROM SERVER", size + " bytes" );
+						} else {
+							log( "RTP  FROM SERVER", size + " bytes" );
+						}
+*/
+						
+						mDatagram.setData( data, offset + 4, size - 4 );
+						mDatagram.setPort( mState == kReadingRTCP ? mRTCPForwarder.getPort() : mRTPForwarder.getPort() );
+						mDatagramSocket.send( mDatagram );
+						
+						offset += size;
+						mState = kReadingUnknown;
+					} break;
+				}
+			}
+			
+			if ( ( remaining = data.length - offset ) > 0 ) {
+				if ( offset > 0 ) {
+					buffer = new byte[ remaining ];
+					System.arraycopy( data, offset, buffer, 0, remaining );
+					data = buffer;
+				}
+				
+				mFixup = data;
+			}
+		}
+		
+		@Override
+		protected void processHeaders() throws Exception {
+			String				header;
+			
+			if ( ( header = getHeaderField( "content-type" ) ) != null ) {
+				if ( header.toLowerCase().equals( "application/x-rtsp-tunnelled" ) ) {
+					// success
+					if ( ( header = getHeaderField( "x-server-ip-address" ) ) != null ) {
+						mTunnelURI = new URI( mTunnelURI.getScheme(), mTunnelURI.getUserInfo(), header, mTunnelURI.getPort(), mTunnelURI.getPath(), mTunnelURI.getQuery(), mTunnelURI.getFragment() );
+//						log( "processHeaders", "set mTunnelURI to " + mTunnelURI );
+					}
+					
+					mTunnelURL = new URI( "http", mTunnelURI.getUserInfo(), mTunnelURI.getHost(), mTunnelURI.getPort(), mTunnelURI.getPath(), mTunnelURI.getQuery(), mTunnelURI.getFragment() ).toASCIIString();
+					
+					return;
+				}
+			}
+
+			throw new Exception( "no rtsp tunnel support" );
+		}
+	}
+	
+	// tunnel related:
+	
+	// Tunnel writer sends messages from the local RTSP client to the server
+	protected class IHRRTSPHTTPTunnelWriter extends IHRObject implements Runnable {
+		protected IHRRTSPHTTPTunnelPost			mPost;
+		
+		public IHRRTSPHTTPTunnelWriter() throws Exception {
+			mPost = new IHRRTSPHTTPTunnelPost();
+
+			Thread				t = new Thread( this );
+			
+			t.setName( this.getClass().getSimpleName() );
+			t.start();
+		}
+		
+		// Handle a client -> server RTP or RTCP message.
+		public void postRTPOrRTCP( int channel, byte[] buffer, int offset, int length ) throws Exception {
+			byte[]						data;
+			
+			data = new byte[ length + 4 ];
+			
+			data[ 0 ] = '$';
+			data[ 1 ] = (byte)( channel     & 0xff );
+			data[ 2 ] = (byte)( length >> 8 & 0xff );
+			data[ 3 ] = (byte)( length      & 0xff );
+			
+			System.arraycopy( buffer, offset, data, 4, length );
+			
+			if ( mPost != null ) {
+				mPost.post( data, 0, data.length, false );
+			} else {
+				new IHRRTSPHTTPTunnelPost( data, 0, data.length, false );
+			}
+		}
+		
+		public void run() {
+			byte[]				buffer, tmp;
+			int					contentLength, i, n, offset, start;
+			boolean				found;
+			InputStream			input;
+			Matcher				matcher;
+			String				rtspHeaders;
+			
+			final int			kBufferGrowsBy = 8192;
+			
+			try {
+				buffer = new byte[ kBufferGrowsBy ];
+				contentLength = 0;
+				found = false;
+				input = mLocalSocket.getInputStream();
+				
+				// read the input stream until "\r\n\r\n" is detected.
+				// this sequence marks the end of an RTSP message.
+
+			scan:
+				
+				for ( i = 3, start = offset = 0; ! mClosed; ) {
+					if ( offset == buffer.length ) {
+						tmp = new byte[ buffer.length + kBufferGrowsBy ];
+						System.arraycopy( buffer, 0, tmp, 0, buffer.length );
+						buffer = tmp;
+					}
+					
+					if ( ( n = IHRUtilities.readInputStream( input, buffer, offset, buffer.length - offset ) ) == -1 ) {
+						log( "run", "throwing unexpected end of stream" );
+						throw new Exception( "unexpected end of stream" );
+					}
+				
+//					dump( "READ from PLAYER", buffer, offset, n ); 
+					
+					offset += n;
+
+					// each post is a complete RTSP message from the client
+					while ( ! mClosed && ( found || i < offset ) ) {
+						if ( contentLength > 0 ) {
+							if ( contentLength < ( n = offset - i ) ) {
+								contentLength = 0;
+								i += contentLength;
+								found = true;
+							} else {
+								contentLength -= n;
+								i += n;
+								continue scan;
+							}
+						}
+						
+						if ( found ) {
+							
+							if ( mPost != null ) {
+								mPost.post( buffer, start, i - start, true );
+							} else {
+								//log.write("message being posted from client and this will throw an exception\r\n");
+								new IHRRTSPHTTPTunnelPost( buffer, start, i - start, true );
+							}
+
+							found = false;
+							start = i;
+							i += 3;
+							
+							continue;
+						}
+
+						if ( buffer[ i     ] != '\n' ) { i += 1; continue; }
+						if ( buffer[ i - 1 ] != '\r' ) { i += 3; continue; }
+						if ( buffer[ i - 2 ] != '\n' ) { i += 1; continue; }
+						if ( buffer[ i - 3 ] != '\r' ) { i += 1; continue; }
+						
+						// here we have the end of the message headers.
+						// an RTSP message can contain a content-length field, in which
+						// case a message body follows.
+						
+						rtspHeaders = new String( buffer, start, ++i - start, "ISO-8859-1" );
+						
+						//log.write("RTSP header in tunnel writer \r\n");
+						//log.write(rtspHeaders);
+
+						matcher = sPatternContentLength.matcher( rtspHeaders );
+						
+						if ( matcher.find() ) {
+							if ( ( contentLength = new Integer( matcher.group( 1 ) ).intValue() ) > 0 ) continue;
+						}
+						
+						found = true;
+					}
+					
+					if ( start > 0 ) {
+						tmp = new byte[ ( n = offset - start ) + kBufferGrowsBy ];
+						System.arraycopy( buffer, start, tmp, 0, n );
+						buffer = tmp;
+						i -= start;
+						offset -= start;
+						start = 0;
+					}
+				}
+			} catch ( Exception e ) {
+				log( "run", "exception " + e );
+				
+				notifyDelegate( kDelegateNotificationTypeRTSPClosed, e );
+			}
+			
+			if ( mPost != null ) { mPost.close(); mPost = null; }
+		}
+	}	
+}

@@ -1,0 +1,185 @@
+package com.clearchannel.iheartradio.model;
+
+import com.clearchannel.iheartradio.android.model.IHRAudioPlayer;
+import com.clearchannel.iheartradio.android.model.IHRHashtable;
+
+// IHRHTTPAudioStreamFile
+abstract public class IHRAudioStreamShoutcastBase extends IHRHTTP {
+	protected String					mContentType;
+	protected int						mDataRead;
+	protected int						mDataRemaining;
+	protected IHRAudioStreamDelegate	mDelegate;
+	protected double					mDuration;
+	protected int						mICYBitrate;
+	protected int						mICYMetaInterval;
+	protected String					mICYName;
+	protected IHRInputStreamAudio		mInputStreamAudio;
+	protected String					mMeta;
+	protected int						mMetaRemaining;
+	protected boolean					mStopping;
+	protected String					mStreamURL;
+	protected Thread					mThread;
+
+	public IHRAudioStreamShoutcastBase( String url, IHRAudioStreamDelegate delegate, Object context ) {
+		super( url, null, context, null );
+
+		mDelegate = delegate;
+
+		mInputStreamAudio = new IHRInputStreamAudio();
+		mInputStreamAudio.start();
+		
+		new Thread( this ).start();
+	}
+
+	// cancel here probably shouldn't stop the player.  this class and that should have a common controller.
+	@Override
+	public void cancel() {
+		IHRAudioPlayer.shared().stop();
+		super.cancel();
+	}
+
+	// protected methods
+
+	protected String extractMetadataFromStreamTitle() {
+		int                             n, o;
+
+		if ( ( n = mMeta.indexOf( "StreamTitle='" ) ) == -1 ) return null;
+
+		n += 13;    // 13 == "StreamTitle='".length()
+
+		if ( n >= mMeta.length() || ( o = mMeta.indexOf( "';", n ) ) == -1 ) return null;
+
+		return mMeta.substring( n, o );
+	}
+	
+	protected IHRHashtable parseMetadata( String metadata ) {
+		IHRHashtable                       hash = new IHRHashtable();
+		int                             i;
+
+		if ( ( i = metadata.indexOf( " - " ) ) != -1 ) {
+			if ( i > 0 ) hash.put( "artist", metadata.substring( 0, i ) );
+			if ( metadata.length() - ( i + 3 ) > 0 ) hash.put( "track", metadata.substring( i + 3 ) );
+		}
+
+		return hash.size() > 0 ? hash : null;
+	}
+
+	@Override
+	protected void prepareRequest() throws Exception {
+		setRequestProperty( "connection", "keep-alive" );
+		setRequestProperty( "icy-metadata", "1" );
+	}
+
+	@Override
+	protected void processData( byte[] data, String message ) throws Exception {
+		byte[]                          buffer;
+		IHRHashtable                      hash;
+		String                          meta;
+		int                             n, o, offset;
+
+		for ( offset = 0, n = data.length; n > 0; ) {
+			if ( mDataRemaining == -1 ) {
+				// this stream has no metadata
+				mDataRead += n;
+				mDuration += mInputStreamAudio.appendAudioBuffer( data );
+
+				break;
+			} else if ( mDataRemaining > 0 ) {
+				// append some data to the output stream
+				o = n < mDataRemaining ? n : mDataRemaining;
+
+				buffer = new byte[ o ];
+				System.arraycopy( data, offset, buffer, 0, o );
+
+				mDuration += mInputStreamAudio.appendAudioBuffer( buffer );
+
+				mDataRead += o;
+				offset += o;
+				n -= o;
+
+				if ( ( mDataRemaining -= o ) == 0 ) mMetaRemaining = -1;
+			} else if ( mMetaRemaining == -1 ) {
+				--n;
+
+				mMetaRemaining = data[ offset++ ] * 16;
+
+				if ( mMetaRemaining == 0 ) {
+					mDataRemaining = mICYMetaInterval;
+				} else {
+					mMeta = "";
+				}
+			} else {
+				o = n < mMetaRemaining ? n : mMetaRemaining;
+
+				mMeta += new String( data, offset, o );
+
+				offset += o;
+				n -= o;
+
+				if ( ( mMetaRemaining -= o ) == 0 ) {
+					mDataRemaining = mICYMetaInterval;
+
+					if ( ( meta = extractMetadataFromStreamTitle() ) != null && meta.length() > 0 ) {
+						if ( ( hash = parseMetadata( meta ) ) != null ) {
+							hash.put( "duration", new Double( mDuration ) );
+							
+							/**
+							System.out.print( "*** METADATA at " + mDuration + ":" );
+							if ( hash.containsKey( "artist" ) ) System.out.print( (String) hash.get( "artist" ) + " " ); 
+							if ( hash.containsKey( "track" ) ) System.out.print( (String) hash.get( "track" ) );
+							System.out.println( "" );
+							/**/
+							
+							(mDelegate).audioStreamReceivedMetadata( mContext, hash );
+						}
+					}
+
+					mMeta = null;
+				}
+			}
+		}
+	}
+
+	@Override
+	protected void processHeaders() throws Exception {
+		String					header;
+
+		super.processHeaders();
+
+		mContentType = getHeaderField( "content-type" );
+		mICYName = getHeaderField( "icy-name" );
+
+		header = getHeaderField( "icy-bitrate" );
+		if ( header == null ) header = getHeaderField( "icy-br" );
+		if ( header != null ) mICYBitrate = Integer.parseInt( header );
+		if ( ( header = getHeaderField( "icy-metaint" ) ) != null ) {
+			mDataRemaining = mICYMetaInterval = Integer.parseInt( header );
+		} else {
+			mDataRemaining = -1;
+		}
+	}
+
+	@Override
+	public void run() {
+		String					reason = null;
+		
+		try {
+			(mDelegate).audioStreamConnecting( mContext, mURL );
+
+			open();
+
+			(mDelegate).audioStreamConnected( mContext, mURL );
+
+			mInputStreamAudio.setContentType( mContentType );
+			mInputStreamAudio.setHighWaterMark( 0 );
+
+			read();
+		} catch ( Exception e ) {
+			reason = e.getMessage();
+		}
+
+		(mDelegate).audioStreamStopped( mContext, reason );
+
+		close();
+	}
+}

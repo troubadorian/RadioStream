@@ -1,0 +1,95 @@
+package com.clearchannel.iheartradio.android.model;
+
+import java.util.HashMap;
+
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.IBinder;
+import android.os.Parcel;
+
+import com.clearchannel.iheartradio.android.services.IHRService;
+import com.clearchannel.iheartradio.android.services.IHRServicePlayer;
+import com.clearchannel.iheartradio.controller.IHRControllerPlayer;
+import com.clearchannel.iheartradio.controller.iheartradio;
+import com.clearchannel.iheartradio.model.IHRStation;
+
+public class IHRPlayerClient extends IHRConnectionClient {
+	private static IHRPlayerClient		mShared;
+	protected IHRControllerPlayer		mDelegate;
+	
+	public static IHRPlayerClient shared() {
+		if ( null == mShared ) mShared = new IHRPlayerClient();
+		
+		return mShared;
+	}
+	
+	public void stop() { serviceTell( IHRServicePlayer.kStop , Parcel.obtain() ); }
+	public void play() { serviceTell( IHRServicePlayer.kPlay , Parcel.obtain() ); }
+//	public void playFile( String inURL ) { serviceTell( IHRServicePlayer.kOpenFileURL , inURL ); }
+//	public void playStream( String inURL ) { serviceTell( IHRServicePlayer.kOpenStreamURL , inURL ); }
+	public void playStation( IHRStation inStation ) { serviceTell( IHRServicePlayer.kPlayStation , inStation ); }
+	public void playStation( String inStation ) { serviceTell( IHRServicePlayer.kPlayStationByLetters , inStation ); }
+	
+//	public void setDescription( String inDescription ) { serviceTell( IHRServicePlayer.kSetDescription , inDescription ); };
+	public String getDescription() { return serviceFetchString( IHRServicePlayer.kCopyDescription , Parcel.obtain() , null ); };
+//	public void setIdentifier( String inIdentifier ) { serviceTell( IHRServicePlayer.kSetIdentifier , inIdentifier ); }
+	public String getIdentifier() { return serviceFetchString( IHRServicePlayer.kCopyIdentifier , Parcel.obtain() , null ); }
+	public IHRHashtable getMetadata() { return serviceFetchHashtable( IHRServicePlayer.kCopyMetadata , Parcel.obtain() ); }
+	public IHRStation getStation() { return (IHRStation)serviceFetchStringsInto( IHRServicePlayer.kCopyStation , Parcel.obtain() , new IHRStation() ); }
+	public String getStatus() { return serviceFetchString( IHRServicePlayer.kCopyStatus , Parcel.obtain() , null ); }
+	public String getURL() { return serviceFetchString( IHRServicePlayer.kCopyURL , Parcel.obtain() , null ); }
+	public float getVolume() { return serviceFetchFloat( IHRServicePlayer.kGetVolume , Parcel.obtain() ); }
+	public void setVolume( float inVolume ) { serviceTell( IHRServicePlayer.kSetVolume , inVolume ); }
+	public void setVolumeByKeycode( int inKeyCode ) { serviceTell( IHRServicePlayer.kSetVolumeByKeycode , inKeyCode ); }
+	public int[] getPosition() { return serviceFetchIntegers( IHRServicePlayer.kGetPosition , Parcel.obtain() ); }
+	public void setPosition( int inMilliseconds ) { serviceTell( IHRServicePlayer.kSetPosition , inMilliseconds ); }
+	public void setStreamIsNew(long inStartTime) {serviceTell(IHRServicePlayer.kStreamIsNew , inStartTime); }
+	
+	public boolean isPlaying() { return serviceFetchInteger( IHRServicePlayer.kIsPlaying , Parcel.obtain() ) != 0; }
+	public boolean isPlayRequested() { return serviceFetchInteger( IHRServicePlayer.kIsPlayRequested , Parcel.obtain() ) != 0; }
+	
+	public void pauseForSeek( boolean inPause ) { serviceTell( inPause ? IHRServicePlayer.kSeekPause : IHRServicePlayer.kSeekUnpause , Parcel.obtain() ); }
+	public void togglePlaying() { serviceTell( IHRServicePlayer.kTogglePlaying , Parcel.obtain() ); }
+	
+	@Override
+	public void onReceive( Context context , Intent intent ) {
+		String						action = intent.getStringExtra( "action" );
+		HashMap<String, Object>		map;
+		IHRHashtable				metadata;
+		
+		if ( action.equals( "status" ) ) {
+			if ( null != mDelegate ) {
+				mDelegate.updateStatus( intent.getStringExtra( action ) );
+			}
+		} else if ( action.equals( "metadata" ) ) {
+			try {
+				if ( mDelegate != null ) {
+					if ( ( map = (HashMap<String, Object>) intent.getSerializableExtra( action ) ) != null ) {
+						metadata = new IHRHashtable( map );
+
+						if ( null != mDelegate ) mDelegate.updateMetadata( metadata );
+					}
+				}
+			} catch ( Exception e ) { }
+		} else if ( action.equals( "throughput" ) ) {
+			if ( null != mDelegate ) mDelegate.updateThroughput( intent.getStringExtra( "message" ) );
+		} else if ( action.equals( "volume" ) ) {
+			if ( null != mDelegate ) mDelegate.updateVolume( intent.getFloatExtra( action, 0 ) );
+		}
+	}
+	
+	@Override
+	public void onServiceConnected( ComponentName inName , IBinder inBinder ) {
+		super.onServiceConnected( inName , inBinder );
+		
+		iheartradio.g.registerReceiver( this , new IntentFilter( IHRServicePlayer.kMessagePlayer ) );
+		//	assume client instantiated by player activity
+//		try { serviceTell( IHRServicePlayer.kBackground , Parcel.obtain() ); } catch ( Exception e ) {}
+	}
+	
+	public void setDelegate( IHRControllerPlayer inDelegate ) {
+		mDelegate = inDelegate;
+	}
+}

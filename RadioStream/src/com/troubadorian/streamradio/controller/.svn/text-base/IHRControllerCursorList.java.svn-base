@@ -1,0 +1,75 @@
+package com.clearchannel.iheartradio.controller;
+
+import android.content.Intent;
+import android.view.View;
+import android.widget.ListView;
+import android.widget.SimpleCursorAdapter;
+
+import com.clearchannel.iheartradio.android.model.IHROneLineCursor;
+import com.clearchannel.iheartradio.android.model.IHRStationsCursor;
+import com.clearchannel.iheartradio.android.view.IHRViewInfoSeparator;
+
+public class IHRControllerCursorList extends IHRControllerList {
+	IHROneLineCursor			mCursor;
+	SimpleCursorAdapter			mCursorAdapter;
+	
+	protected void setListCursor( IHROneLineCursor inCursor ) {
+		mCursor = inCursor;
+		
+		if ( null == mCursorAdapter && null != mCursor ) {
+			mCursorAdapter = mCursor.newAdapter( activity() );
+			
+			setListAdapter( mCursorAdapter );
+		} else if ( null != mCursorAdapter ) {
+			mCursorAdapter.changeCursor( mCursor );
+		}
+	}
+	
+	@Override
+	public void onNewIntent( Intent intent ) {
+		setListCursor( IHRStationsCursor.cursorForIntent( intent ) );
+	}
+	
+	@Override
+	protected void onListItemClick( ListView l, View v, int position, long id ) {
+		Intent					intent = new Intent();
+		
+		mCursor.prepareIntent( intent , position );
+
+		//New code for #1064 (part 3 of 3)
+		//Part 1 in the top of IHRControllerPremiumArchives.java
+		//Part 2 at line 440 in IHRControllerPlayer.java
+		//Part 3 at line 40 in IHRControllerCursorList.java
+		//without changing the current work flow, using a static list 
+		//to hold the intent for the following hours in the same day
+		IHRControllerPremiumArchives.followingIntents.clear();
+		if(this instanceof IHRControllerPremiumArchives){
+			int count = l.getCount();
+			Object child;
+			for(int i =position+1; i< count; i++){
+				child = l.getChildAt(i);
+				Intent intentChild; 
+				if(child== null || child instanceof IHRViewInfoSeparator){
+					break;
+				}
+				intentChild = new Intent();
+				//mCursor.prepareIntent( intentChild , position );
+				mCursor.prepareIntent( intentChild , i );
+				IHRControllerPremiumArchives.followingIntents.add(intentChild);
+			}
+		}
+
+		
+		if ( null != intent.getStringExtra( "video" ) ) {
+			intent.putExtra( "class" , IHRControllerVideo.class.getName() );
+		} else if ( null != intent.getStringExtra( "station" ) ) {
+			intent.putExtra( "class" , IHRControllerPlayer.class.getName() );
+		} else if ( null == intent.getStringExtra( "class" ) ) {
+			intent.putExtra( "class" , IHRControllerCursorList.class.getName() );
+		}
+		
+		try {
+			startController( intent );
+		} catch ( Exception e ) {}
+	}
+}

@@ -1,0 +1,231 @@
+package com.clearchannel.iheartradio.model;
+
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import android.util.Log;
+
+abstract public class IHRHTTPConnectionBase extends IHRObject {
+	protected AtomicBoolean				mCancelled;
+//	protected boolean					mCancelled;
+	protected int						mCompressionType;
+	protected String					mCredentialsIdentifier;
+	protected int						mAuthorizationCount;
+	protected Object					mConnection;
+	protected int						mContentLength;
+	protected InputStream				mInputStream;
+	protected InputStream				mInputStreamCompressed;
+	protected DataOutputStream			mOutputStream;
+	protected byte[]					mPostData;
+	protected boolean					mSuccess;
+	protected String					mURL;
+	
+	protected static final int			kCompressionTypeDeflate = 1;
+	protected static final int			kCompressionTypeGZip = 2;
+	protected static final int			kCompressionTypeNone = 0;
+	
+	public IHRHTTPConnectionBase( String url, byte[] postData ) {
+		mCancelled = new AtomicBoolean();
+		mPostData = postData;
+		mURL = url;
+	}
+	
+	public void open() throws IOException { open( mURL ); }
+	
+	
+	public static void logMap( String inTag , Map<String,List<String>> inMap ) {
+		List<String>				list;
+		
+		for ( String key : inMap.keySet() ) {
+			list = inMap.get( key );
+			
+			for ( String value : list ) {
+				Log.d( inTag , key + ": " + value );
+			}
+		}
+	}
+		
+	// opens the URL.  On return mConnection and mInputStream will be valid.
+	protected void open( String url ) throws IOException {
+		try {
+			IHRPremiumCredentials		premium = IHRPremiumCredentials.shared();
+			int							attempts = 0;
+			int							code;
+			
+			do {
+				createConnection( url );
+				
+				((HttpURLConnection) mConnection).setDoInput( true );
+				((HttpURLConnection) mConnection).setDoOutput( true );
+				((HttpURLConnection)mConnection).setConnectTimeout(1000);//Sriram 09-23-2010
+				((HttpURLConnection)mConnection).setReadTimeout(1000);//09-23-2010				
+				prepareRequest();
+				
+				if ( 1 == attempts && null != mCredentialsIdentifier ) {
+					String				credentials = premium.credentials( mCredentialsIdentifier );
+					
+					if ( null != credentials ) setRequestProperty( "Authorization", credentials );
+					
+//					logMap( "request" , ((HttpURLConnection) mConnection).getRequestProperties() );
+				}
+				
+				openConnection();
+				
+				if ( mPostData != null ) post( mPostData );
+				
+				code = getResponseCode();
+				
+				if ( processResponse() ) {
+					if ( attempts > 0 && null != mCredentialsIdentifier ) {
+						premium.accept( mCredentialsIdentifier , true );
+					}
+					
+					return;		//	success
+				} else if ( 301 == code || 302 == code || 307 == code ) {
+					url = getHeaderField( "Location" );
+					attempts = 0;
+					
+					if ( null == url ) break;
+				} else if ( 401 == code && null != mCredentialsIdentifier ) {
+//					Log.d( "response" , ((HttpURLConnection) mConnection).getResponseMessage() + " " + getResponseCode() );
+//					logMap( "response" , ((HttpURLConnection) mConnection).getHeaderFields() );
+					
+					if ( attempts > 0 ) {
+						premium.accept( mCredentialsIdentifier , false );
+						break;
+					} else {
+						close();
+					}
+				} else if ( 302 == code ) {
+					//	if connected retry immediately
+					break;
+				} else {
+					break;
+				}
+			} while ( ++attempts < 3 );
+		} catch ( Exception e ) {
+			log( "open", "caught " + e.toString() + ", " + url );
+		}
+		
+		close();
+		
+		throw new IOException( "failed to open " + mURL );
+	}
+
+	// abstract methods
+	
+	abstract protected void closeConnection();
+	abstract protected void createConnection( String url ) throws Exception;
+	abstract protected OutputStream getOutputStream() throws Exception;
+	abstract protected String getHeaderField( String key ) throws Exception;
+	abstract protected int getHeaderFieldInt( String key, int defaultValue ) throws Exception;
+	abstract protected String getHeaderFieldKey( int index ) throws Exception;
+//	abstract protected IHRHashtable getHeaderFields() throws Exception;
+	abstract protected int getResponseCode() throws Exception;
+//	abstract protected String getResponseMessage() throws Exception;
+	abstract protected void openConnection() throws Exception;
+	abstract protected void openInputStream() throws Exception;
+	abstract protected void setRequestMethod( String method ) throws Exception;
+	abstract protected void setRequestProperty( String property, String value ) throws Exception;
+	
+	// protected methods
+	
+	protected void close() {
+		if ( mInputStream != null ) {
+			try { mInputStream.close(); } catch ( Exception e ) { }
+		
+			mInputStream = null;
+		}
+		
+		if ( mInputStreamCompressed != null ) {
+			try { mInputStreamCompressed.close(); } catch ( Exception e ) { }
+			
+			mInputStreamCompressed = null;
+		}
+		
+		if ( mOutputStream != null ) {
+			try { mOutputStream.close(); } catch ( Exception e ) { }
+			
+			mOutputStream = null;
+		}
+		
+		closeConnection();
+	}
+
+	protected void post( byte[] data ) throws Exception {
+		if ( mOutputStream == null ) {
+			mOutputStream = new DataOutputStream( getOutputStream() );
+//			log( "post classname", mOutputStream.getClass().getName() );
+		}
+
+		if ( data == null || data.length == 0 ) return;
+		
+		mOutputStream.write( data );
+		mOutputStream.flush();
+	}
+
+	protected void prepareRequest() throws Exception {
+		if ( mPostData != null ) {
+			setRequestMethod( "POST" );
+			
+			setRequestProperty( "Content-Length", String.valueOf( mPostData.length ) );
+			setRequestProperty( "Content-Type", "application/x-www-form-urlencoded" );
+		}
+
+		setRequestProperty( "Accept-Encoding", "gzip, deflate" );
+	}
+
+	protected void processHeaders() throws Exception {
+		String					header;
+
+/*
+		String					key, value;
+		int						i;
+		
+		for ( i = 0;; ++i ) {
+			if ( ( key = getHeaderFieldKey( i ) ) == null ) break;
+			value = getHeaderField( key );
+
+			log( "processHeaders", key + " = " + value );
+		}
+*/
+		if ( ( header = getHeaderField( "Content-Encoding" ) ) != null ) {
+//			log( "processHeaders", "content-encoding: " + header );
+			
+			if ( header.toLowerCase().indexOf( "deflate" ) != -1 ) mCompressionType = kCompressionTypeDeflate;
+			if ( header.toLowerCase().indexOf( "gzip" ) != -1 ) mCompressionType = kCompressionTypeGZip;
+		}
+		
+		if ( mCompressionType == kCompressionTypeNone ) {
+			if ( ( mContentLength = getHeaderFieldInt( "content-length", 0 ) ) < 0 ) mContentLength = 0;
+			
+			// TODO: handle chunked transfer encoding notification
+		}
+
+//		log( "processHeaders", "content-length is " + mContentLength );
+	}
+	
+	protected boolean processResponse() throws Exception {
+		int						code = getResponseCode();
+		
+		if ( 200 == code ) {
+			processHeaders();
+			openInputStream();
+
+			return true;
+		}
+		
+		log( "open", "got response code " + code );
+
+		return false;
+	}
+	
+	protected void processData( byte[] inData ) throws Exception {}
+	protected void processData( byte[] inData , String inMessage ) throws Exception { processData( inData ); }
+}

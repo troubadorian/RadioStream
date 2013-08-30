@@ -1,0 +1,42 @@
+package com.clearchannel.iheartradio.model;
+
+
+public class IHRInputStreamBlocking extends IHRInputStream {
+	protected boolean                               mStarted;
+
+	public synchronized void append( byte[] inBuffer ) {
+		if ( ! mStarted || inBuffer == null || inBuffer.length <= 0 ) return;
+		
+		mBytesAvailable += inBuffer.length;
+		mData.addElement( inBuffer );
+
+		notify();
+	}
+
+	public synchronized void start() { mStarted = true; }
+	public synchronized void stop() { mStarted = false; flush(); notifyAll(); }
+
+	// protected methods
+
+	protected synchronized int getNextBuffer() {
+		mCurrentBufferOffset = 0;
+
+		for ( ;; ) {
+			if ( ! mStarted ) return -1;
+
+			if ( mData.size() > 0 ) {
+				mCurrentBuffer = (byte[]) mData.elementAt( 0 );
+				mData.removeElementAt( 0 );
+				break;
+			}
+
+			// no buffers are available.  block for input.
+			
+			mCurrentBuffer = null;
+
+			try { wait(); } catch ( Exception e ) { }
+		}
+
+		return mCurrentBuffer.length;
+	}
+}

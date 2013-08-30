@@ -1,0 +1,80 @@
+package com.clearchannel.iheartradio.android.model;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.ServerSocket;
+import java.net.Socket;
+
+import com.clearchannel.iheartradio.model.IHRAudioStreamDelegate;
+import com.clearchannel.iheartradio.model.IHRAudioStreamShoutcastBase;
+
+// IHRAudioStreamShoutcast is single-use
+public class IHRAudioStreamShoutcast extends IHRAudioStreamShoutcastBase implements Runnable {
+	protected ServerSocket				mServerSocket;
+
+	public IHRAudioStreamShoutcast( String url, IHRAudioStreamDelegate delegate, Object context ) throws IOException {
+		super( url, delegate, context );
+
+		mServerSocket = new ServerSocket( 0 );
+		
+		new DummyHTTPServer().start();
+	}
+
+	public String getLocalURL() {
+		return "http://127.0.0.1:" + mServerSocket.getLocalPort() + "/";
+	}
+	
+	// protected methods
+	
+	// Android sees "ICY 200 OK" as an invalid HTTP response and returns -1 from HttpURLConnection.getResponseCode(),
+	// then it goes ahead and processes the headers as if it were a valid HTTP response.
+	@Override
+	protected int getResponseCode() throws Exception { return 200; }
+	
+	// protected classes
+	
+	protected class DummyHTTPServer extends Thread {
+		@Override
+		public void run() {
+			byte[]					buffer = new byte[ 8192 ];
+			Socket					client = null;
+			int						n;
+			InputStream				input = null;
+			OutputStream			output = null;
+			
+			try {
+				client = mServerSocket.accept();
+				input = client.getInputStream();
+				output = client.getOutputStream();
+	
+				while ( ( n = input.available() ) == 0 ) {
+					Thread.sleep( 100 );
+				}
+				
+				input.read( new byte[ n ] );
+				
+//				Calendar.getInstance( Timezone. )
+					
+				output.write( "HTTP/1.1 200 OK\r\n".getBytes() );
+				output.write( "Content-Type: audio/mpeg\r\n".getBytes() );
+				output.write( "Date: Sat, 6 Dec 2009 04:34:56 GMT\r\n".getBytes() );
+				output.write( "Server: Apache\r\n".getBytes() );
+				output.write( "\r\n".getBytes() );
+				
+				while ( ! mCancelled.get() ) {
+					if ( ( n = mInputStreamAudio.read( buffer ) ) > 0 ) {
+						output.write( buffer, 0, n );
+					}
+				}
+			} catch ( Exception e ) {
+				// notify delegate
+				log( "DummyHTTPServer", "error: " + e.toString() );
+			}
+
+			if ( output != null ) try { output.close(); } catch ( Exception e ) { }
+			if ( client != null ) try { client.close(); } catch ( Exception e ) { }
+			if ( mServerSocket != null ) try { mServerSocket.close(); } catch ( Exception e ) { }  
+		}
+	}
+}
